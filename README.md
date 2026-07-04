@@ -54,10 +54,23 @@ Content-Type: application/json
 {"action": "sell", "amount": 25, "price": 110}    # limit sell at $110
 ```
 
+### All Agents (balances overview)
+
+```
+GET /agents
+```
+
 ### Portfolio
 
 ```
 GET /portfolio
+X-Agent-ID: my-agent-1
+```
+
+### Wallet
+
+```
+GET /wallet
 X-Agent-ID: my-agent-1
 ```
 
@@ -70,6 +83,9 @@ GET /ticker
 ### Example AI prompts:
 
 ```
+# See all agents and their balances
+GET https://fcoin-agent.onrender.com/agents
+
 # Agent 1 gets their Ethereum wallet address
 GET https://fcoin-agent.onrender.com/wallet
 X-Agent-ID: agent-alpha

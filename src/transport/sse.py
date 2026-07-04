@@ -62,6 +62,21 @@ async def _wallet(request: Request) -> JSONResponse:
     })
 
 
+async def _agents(request: Request) -> JSONResponse:
+    """GET /agents — list all agents and their USDC/fcoin balances."""
+    ex = get_exchange()
+    agents = []
+    for aid in ex.list_agents():
+        portfolio = ex.get_portfolio(aid)
+        agents.append({
+            "agent_id": aid,
+            "address":  portfolio["address"],
+            "usdc":     portfolio["usdc"]["total"],
+            "fcoin":    portfolio["fcoin"]["total"],
+        })
+    return JSONResponse({"agents": agents})
+
+
 async def _prompt(request: Request) -> JSONResponse:
     """GET /prompt — returns instructions for this agent. Paste the 'url' into any AI and it reads the 'instructions'."""
     agent_id = request.headers.get("X-Agent-ID", "default")
@@ -164,6 +179,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/ticker", _ticker, methods=["GET"])
     app.add_route("/portfolio", _portfolio, methods=["GET"])
     app.add_route("/wallet", _wallet, methods=["GET"])
+    app.add_route("/agents", _agents, methods=["GET"])
     app.add_route("/prompt", _prompt, methods=["GET"])
     app.add_route("/trade", lambda r: _trade(r, server), methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
