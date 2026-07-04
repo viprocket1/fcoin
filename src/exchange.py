@@ -187,6 +187,22 @@ class AgentWallet:
         # Ethereum-style wallet
         self._key = self._generate_key(priv_key)
 
+    @property
+    def available_usdc(self) -> float:
+        return self._balances["usdc"].available
+
+    @available_usdc.setter
+    def available_usdc(self, value: float) -> None:
+        self._balances["usdc"].available = value
+
+    @property
+    def available_fcoin(self) -> float:
+        return self._balances["fcoin"].available
+
+    @available_fcoin.setter
+    def available_fcoin(self, value: float) -> None:
+        self._balances["fcoin"].available = value
+
     # ---------------------------------------------------------------------------
     # Ethereum wallet
     # ---------------------------------------------------------------------------
@@ -364,8 +380,8 @@ class AgentWallet:
 
     def _execute_order(
         self,
-        order: Order,
-        book: OrderBook | None,
+        order:    Order,
+        book:     OrderBook | None,
         mid_price: float,
         fee_rate: float,
     ) -> None:
@@ -379,17 +395,17 @@ class AgentWallet:
 
         if order.side == Side.BUY:
             total = cost + fee
-            if self._balances["usdc"].available < total:
+            if self.available_usdc < total:
                 order.status = "rejected"
                 return
-            self._balances["usdc"].available -= total
-            self._balances["fcoin"].available += order.quantity
+            self.available_usdc -= total
+            self.available_fcoin += order.quantity
         else:
-            if self._balances["fcoin"].available < order.quantity:
+            if self.available_fcoin < order.quantity:
                 order.status = "rejected"
                 return
-            self._balances["fcoin"].available -= order.quantity
-            self._balances["usdc"].available  += cost - fee
+            self.available_fcoin -= order.quantity
+            self.available_usdc  += cost - fee
 
         order.filled  = order.quantity
         order.status  = "filled"
