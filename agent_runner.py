@@ -192,6 +192,29 @@ _CRED_CANDIDATES: list[tuple[str, str, Path, tuple[tuple[str, ...], ...]]] = [
         (("credential_pool", "openrouter", "api_key"),
          ("providers",       "openrouter", "api_key"))),
     # ~/.hermes/.env is read by the broad `.env` scan (covers all Hermes env keys)
+
+    # --- Google Gemini CLI (https://github.com/google-gemini/gemini-cli) ---
+    # ~/.gemini/oauth_creds.json holds OAuth tokens (access_token, refresh_token).
+    # These are NOT raw GOOGLE_API_KEYs — but Google's OAuth bearer works
+    # against https://generativelanguage.googleapis.com (Code Assist flow).
+    # We adopt access_token into OPENAI_API_KEY and route via the OpenAI-compat
+    # endpoint; if the token isn't valid there, the error message points the
+    # user at GOOGLE_API_KEY / GEMINI_API_KEY as the canonical alternative.
+    ("openai",    "Gemini CLI (oauth)",
+        Path.home() / ".gemini" / "oauth_creds.json",
+        (("access_token",),)),
+    # Antigravity (`agy`, see ~/.hermes/.../antigravity-cli/SKILL.md) shares
+    # ~/.gemini/ with the Gemini CLI. settings.json can carry auth config
+    # (apiKey field) when the OS keyring isn't usable (Linux/WSL fallback).
+    ("openai",    "Antigravity CLI (settings)",
+        Path.home() / ".gemini" / "antigravity-cli" / "settings.json",
+        (("apiKey",), ("auth", "apiKey"), ("auth", "api_key"),
+         ("api_key",), ("auth", "selectedType"))),  # last key is sentinel-only
+    # Google `gcloud auth application-default login` writes OAuth here. Same
+    # note as Gemini CLI: bearer goes against Google endpoints, not AI Studio.
+    ("openai",    "gcloud ADC",
+        Path.home() / ".config" / "gcloud" / "application_default_credentials.json",
+        (("access_token",),)),
 ]  # noqa: E501
 
 
@@ -334,6 +357,19 @@ def discover_credentials() -> dict[str, str]:
                     adopt({env_name: value}, f"{source} ({path.name})")
             except Exception:
                 pass
+
+    # ---- Google-specific base-url routing --------------------------------
+    # If we discovered a Google / Gemini / Antigravity / gcloud key, route
+    # OPENAI_BASE_URL at Google's OpenAI-compat endpoint so call_openai
+    # reaches Gemini-family models.
+    if os.environ.get("OPENAI_API_KEY") and not os.environ.get("OPENAI_BASE_URL"):
+        src_label = found.get("OPENAI_API_KEY", "")
+        if any(name in src_label for name in ("Gemini CLI", "Antigravity", "gcloud", "Gemini", "antigravity-cli")):
+            os.environ["OPENAI_BASE_URL"] = "https://generativelanguage.googleapis.com/v1beta/openai"
+            found["OPENAI_BASE_URL"] = f"{src_label} (auto-routed)"
+        # Else: user has raw GOOGLE_API_KEY/GEMINI_API_KEY in env. We intentionally
+        # don't promote it — they should `export GEMINI_API_KEY=...` (or set up
+        # `rune`'s ~/.env) and we'll route via the same base on the next pass.
 
     # Walk sub-paths worth checking (Claude / OpenCode may use quirky layouts)
     for root in (h / ".claude", h / ".config"):
@@ -516,21 +552,40 @@ def main() -> None:
     # ~/.env, ~/.netrc, etc.) and adopt without prompting.
     provider = args.provider
     if provider is None:
-        if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")):
+        # Run the sniffer (it loads .env, ~/.hermes/.env, ~/.hermes/auth.json, etc.)
+        if not (os.environ.get("ANTHROPIC_API_KEY")
+                or os.environ.get("OPENAI_API_KEY")
+                or os.environ.get("GOOGLE_API_KEY")
+                or os.environ.get("GEMINI_API_KEY")):
             discovered = discover_credentials()
             if discovered.get("_FOUND_IN"):
                 print(f"[creds] discovered LLM keys from: {discovered['_FOUND_IN']}")
+
+        # Promote Google raw keys to OPENAI_API_KEY + Gemini base URL when no
+        # other provider claim exists. Order: Anthropic > OpenAI raw > Google.
+        if not os.environ.get("OPENAI_API_KEY"):
+            for gkey in ("GOOGLE_API_KEY", "GEMINI_API_KEY"):
+                if os.environ.get(gkey):
+                    os.environ["OPENAI_API_KEY"] = os.environ[gkey]
+                    if not os.environ.get("OPENAI_BASE_URL"):
+                        os.environ["OPENAI_BASE_URL"] = (
+                            "https://generativelanguage.googleapis.com/v1beta/openai"
+                        )
+                    break
         if os.environ.get("ANTHROPIC_API_KEY"):
             provider = "anthropic"
         elif os.environ.get("OPENAI_API_KEY"):
             provider = "openai"
         else:
             print("ERROR: no LLM credentials found. Set ANTHROPIC_API_KEY or "
-                  "OPENAI_API_KEY, or install one of: "
-                  "Codex CLI (~/.codex/auth.json), "
+                  "OPENAI_API_KEY, or one of: GOOGLE_API_KEY / GEMINI_API_KEY, "
+                  "or install one of: Codex CLI (~/.codex/auth.json), "
                   "Claude Code (~/.claude/config.json), "
-                  "OpenCode (~/.config/opencode/opencode.json), "
-                  "or write a ~/.env file.",
+                  "Hermes Agent (~/.hermes/.env + ~/.hermes/auth.json), "
+                  "Gemini CLI (~/.gemini/oauth_creds.json), "
+                  "Antigravity CLI (~/.gemini/antigravity-cli/settings.json), "
+                  "or write a ~/.env file. NOTE: Antigravity CLI stores creds "
+                  "in the OS keyring by default, not a file.",
                   file=sys.stderr)
             sys.exit(1)
 

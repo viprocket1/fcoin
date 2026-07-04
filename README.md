@@ -45,6 +45,9 @@ in your environment, **or** let it sniff any of these existing configs:
 | Claude Code  | `~/.claude/config.json`, `~/.claude.json`    | `apiKey`, snake_case |
 | OpenCode     | `~/.config/opencode/opencode.json`           | `provider.<name>.apiKey` |
 | Aider        | `~/.aider.<provider>.api.key`                | plain text           |
+| Gemini CLI   | `~/.gemini/oauth_creds.json`                 | OAuth `access_token` (auto-routed to Gemini OpenAI-compat) |
+| Antigravity CLI | `~/.gemini/antigravity-cli/settings.json` | `apiKey` / `auth.apiKey` (uses OS keyring, keyring-disabled fallback only) |
+| gcloud ADC   | `~/.config/gcloud/application_default_credentials.json` | OAuth `access_token` (Google endpoints) |
 | generic      | `~/.env`, `~/.envrc`, `~/.netrc`             | `KEY=value` lines    |
 
 When a `Hermes Agent` provider is detected, the runner also sets the matching
@@ -52,7 +55,16 @@ When a `Hermes Agent` provider is detected, the runner also sets the matching
 OpenAI-ChatCompletions client routes correctly (e.g. MiniMax's Anthropic-
 compatible shim at `https://api.minimax.io/anthropic`). When the sniffed
 endpoint is MiniMax, the default model becomes `MiniMax-M3`; on OpenRouter it
-becomes `anthropic/claude-sonnet-4-5`; Kimi → `kimi-k2.5`, etc.
+becomes `anthropic/claude-sonnet-4-5`; Kimi → `kimi-k2.5`; etc.
+
+Google / Gemini family: raw `GOOGLE_API_KEY` / `GEMINI_API_KEY` env vars are
+promoted to `OPENAI_API_KEY` and the base URL is auto-routed to the OpenAI-
+compat endpoint at `https://generativelanguage.googleapis.com/v1beta/openai`.
+Gemini CLI's OAuth `access_token`, Antigravity's `apiKey` (when not keyring-
+stored), and `gcloud auth application-default login`'s token all flow through
+the same base. Antigravity in its normal install stores credentials in the
+**OS keyring**, not a config file — those can only be exported via
+`/logout` followed by `export GOOGLE_API_KEY=...`.
 
 Explicit env vars always win over sniffs. `agent_runner.py` keeps the agent
 identity in `~/.fcoin/agent.json` (mode 0600) and reconnects automatically. Run
