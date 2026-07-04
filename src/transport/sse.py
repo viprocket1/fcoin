@@ -227,6 +227,102 @@ async def _trade_coin(request: Request) -> JSONResponse:
         return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
 
 
+async def _submit_prompt(request: Request) -> JSONResponse:
+    """
+    POST /submit_prompt — Submit a prompt to the marketplace.
+    Header: X-Agent-ID: <submitter-agent-id>
+    Body: {"prompt": "...", "fee_usdc": 0.10, "max_responses": 1, "model_hint": "claude-sonnet-4"}
+    Locks fee_usdc * max_responses USDC from submitter immediately.
+    """
+    try:
+        agent_id = request.headers.get("X-Agent-ID", "default")
+        body = await request.json()
+        prompt        = body.get("prompt", "")
+        fee_usdc      = float(body.get("fee_usdc", 0))
+        max_responses = int(body.get("max_responses", 1))
+        model_hint    = body.get("model_hint", "")
+
+        from ..prompts import prompt_market
+        result = prompt_market.submit_prompt(
+            submitter=agent_id,
+            prompt=prompt,
+            fee_usdc=fee_usdc,
+            max_responses=max_responses,
+            model_hint=model_hint,
+        )
+        return JSONResponse({"agent_id": agent_id, **result})
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=400)
+
+
+async def _respond_prompt(request: Request) -> JSONResponse:
+    """
+    POST /respond_prompt — Submit an LLM response to a prompt (agents earn USDC).
+    Header: X-Agent-ID: <agent-id>
+    Body: {"request_id": "pr_abc123", "response": "..."}
+    """
+    try:
+        agent_id = request.headers.get("X-Agent-ID", "default")
+        body = await request.json()
+        request_id = body.get("request_id", "")
+        response   = body.get("response", "")
+
+        from ..prompts import prompt_market
+        result = prompt_market.submit_response(
+            agent_id=agent_id,
+            request_id=request_id,
+            response=response,
+        )
+        return JSONResponse(result)
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=400)
+
+
+async def _get_prompt(request: Request) -> JSONResponse:
+    """GET /prompt/{id} — get a prompt request and its responses."""
+    try:
+        request_id = request.path_params.get("id", "")
+        from ..prompts import prompt_market
+        result = prompt_market.get_request(request_id)
+        if result is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse(result)
+    except Exception as exc:
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _list_prompts(request: Request) -> JSONResponse:
+    """GET /prompts?status=open — list prompt requests."""
+    try:
+        from ..prompts import prompt_market
+        status = request.query_params.get("status", "")
+        if status == "open":
+            items = prompt_market.list_open_requests()
+        else:
+            items = prompt_market.list_all_requests()
+        return JSONResponse({"prompts": items, "count": len(items)})
+    except Exception as exc:
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _cancel_prompt(request: Request) -> JSONResponse:
+    """
+    DELETE /prompt/{id} — cancel an open prompt and refund unspent fees.
+    Header: X-Agent-ID: <submitter-agent-id>
+    """
+    try:
+        agent_id = request.headers.get("X-Agent-ID", "default")
+        request_id = request.path_params.get("id", "")
+        from ..prompts import prompt_market
+        result = prompt_market.cancel_request(request_id, by_agent=agent_id)
+        return JSONResponse(result)
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=400)
+
+
 async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) -> None:
     if SseServerTransport is None:
         raise ImportError(
@@ -291,6 +387,11 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/trade", _trade_handler, methods=["POST"])
     app.add_route("/create_coin", _create_coin, methods=["POST"])
     app.add_route("/trade_coin", _trade_coin, methods=["POST"])
+    app.add_route("/submit_prompt", _submit_prompt, methods=["POST"])
+    app.add_route("/respond_prompt", _respond_prompt, methods=["POST"])
+    app.add_route("/prompts", _list_prompts, methods=["GET"])
+    app.add_route("/prompt/{id}", _get_prompt, methods=["GET"])
+    app.add_route("/prompt/{id}", _cancel_prompt, methods=["DELETE"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.add_route("/stream", handle_market_stream, methods=["GET"])
     app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])
