@@ -10,6 +10,7 @@ Requires: mcp (included in core dependencies)
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     from ..server import MCPServer
 
 from ..stream import market_stream
+from starlette.responses import StreamingResponse
 
 log = logging.getLogger("fcoin.mcp.sse")
 
@@ -247,19 +249,34 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
 
     async def handle_market_stream(request: Request) -> Response:
         """GET /stream — SSE stream of live ticker, orderbook, and trade events."""
-        event_filter = request.query_params.get("events")  # e.g. "ticker,trade"
+        filter_str = request.query_params.get("events", "ticker,orderbook,trade")
+        # Subscribe first so we don't miss any events
+        sub = await market_stream.subscribe(put_fn=None, event_filter=filter_str)
 
-        async def sse_put(data: bytes) -> None:
-            await request._send({"type": "http.response.body", "body": data})
+        async def event_generator():
+            yield b"event: connected\ndata: {\"type\":\"connected\",\"events\":[" + \
+                ",".join(f'"{e}"' for e in filter_str.split(",")) + b"]}\n\n"
+            try:
+                while True:
+                    try:
+                        event = await asyncio.wait_for(sub.queue.get(), timeout=30)
+                        name = event.get("type", "message")
+                        payload = json.dumps(event).encode()
+                        yield f"event: {name}\ndata: ".encode() + payload + b"\n\n"
+                    except asyncio.TimeoutError:
+                        yield b": ping\n\n"
+            finally:
+                await market_stream.unsubscribe(sub)
 
-        sub = await market_stream.subscribe(sse_put, event_filter=event_filter)
-        try:
-            await market_stream.push_to(sub, sse_put)
-        except Exception:
-            pass
-        finally:
-            await market_stream.unsubscribe(sub)
-        return Response()
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     async def _trade_handler(request: Request) -> JSONResponse:
         return await _trade(request, server)

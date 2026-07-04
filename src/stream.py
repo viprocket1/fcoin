@@ -35,8 +35,8 @@ MARKET_EVENTS = ("ticker", "orderbook", "trade", "trade_batch")
 @dataclass
 class Subscriber:
     """One SSE client waiting on market_stream.events."""
-    queue:     asyncio.Queue
-    event_filter: str | None = None   # None = all events
+    queue:      asyncio.Queue
+    event_filter: set[str] | None = None   # None = all events
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,8 @@ class MarketStream:
         async def _deliver():
             async with self._lock:
                 for sub in self._subs:
-                    if sub.event_filter is None or sub.event_filter == event.get("type"):
+                    ev_type = event.get("type")
+                    if sub.event_filter is None or ev_type in sub.event_filter:
                         try:
                             sub.queue.put_nowait(event)
                         except asyncio.QueueFull:
@@ -88,17 +89,22 @@ class MarketStream:
 
     async def subscribe(
         self,
-        put_fn: Callable[[bytes], Awaitable[None]],
+        put_fn: Callable[[bytes], Awaitable[None]] | None = None,
         event_filter: str | None = None,
         subscriber: Subscriber | None = None,
     ) -> Subscriber:
         """
-        Register a new SSE client and stream events to it via put_fn.
-        Returns the Subscriber so the caller can await events from sub.queue.
+        Register a new SSE client and stream events to it.
+        Returns the Subscriber whose .queue holds incoming events.
+
+        put_fn is ignored — events flow through sub.queue instead.
+        event_filter: comma-separated event types, or None for all.
         """
         if subscriber is None:
             queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=self._max_queue)
-            subscriber = Subscriber(queue=queue, event_filter=event_filter)
+            # Normalise filter to a set of event types
+            filters = set(event_filter.split(",")) if event_filter else None
+            subscriber = Subscriber(queue=queue, event_filter=filters)
 
         async with self._lock:
             self._subs.append(subscriber)
