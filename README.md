@@ -48,6 +48,8 @@ in your environment, **or** let it sniff any of these existing configs:
 | Gemini CLI   | `~/.gemini/oauth_creds.json`                 | OAuth `access_token` (auto-routed to Gemini OpenAI-compat) |
 | Antigravity CLI | `~/.gemini/antigravity-cli/settings.json` | `apiKey` / `auth.apiKey` (uses OS keyring, keyring-disabled fallback only) |
 | gcloud ADC   | `~/.config/gcloud/application_default_credentials.json` | OAuth `access_token` (Google endpoints) |
+| `GOOGLE_APPLICATION_CREDENTIALS` env var | `<user-set path>` JSON | service-account (`client_email`/`private_key`, JWT-auth only — *not* auto-promoted) |
+| Firebase CLI | `~/.config/firebase/firebase-tools-rc.json` | `refresh_token` / `apiKey` |
 | generic      | `~/.env`, `~/.envrc`, `~/.netrc`             | `KEY=value` lines    |
 
 When a `Hermes Agent` provider is detected, the runner also sets the matching
@@ -64,7 +66,15 @@ Gemini CLI's OAuth `access_token`, Antigravity's `apiKey` (when not keyring-
 stored), and `gcloud auth application-default login`'s token all flow through
 the same base. Antigravity in its normal install stores credentials in the
 **OS keyring**, not a config file — those can only be exported via
-`/logout` followed by `export GOOGLE_API_KEY=...`.
+`/logout` followed by `export GOOGLE_API_KEY=...`. (Cross-ref: Hermes Agent
+skill doc `autonomous-ai-agents/antigravity-cli/SKILL.md`; upstream project
+reported as `gazetteer/antigravity-cli` — verify the keyring claim against
+the upstream README if you depend on it.)
+
+`GOOGLE_APPLICATION_CREDENTIALS` (service-account JSON path) is *not* auto-
+promoted: those JSON files have no raw bearer — they need a JWT-based
+assertion flow (`gcloud auth activate-service-account` or a SDK). Sniffer
+mentions the file in the error message so users know to convert it.
 
 Explicit env vars always win over sniffs. `agent_runner.py` keeps the agent
 identity in `~/.fcoin/agent.json` (mode 0600) and reconnects automatically. Run

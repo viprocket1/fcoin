@@ -124,6 +124,7 @@ def _read_json_keys(
     """Read a JSON file and pluck strings at several possible key paths.
     Each `keys` tuple is a chain into the JSON dict; the leaf must be a string.
     `env_for_keys` maps leaf key name -> environment variable name.
+    First non-empty hit per env-var wins (no overwrite).
     """
     try:
         data = json.loads(path.read_text(errors="replace"))
@@ -139,7 +140,7 @@ def _read_json_keys(
             node = node.get(k)  # type: ignore[union-attr]
         if isinstance(node, str) and node.strip():
             env_name = env_for_keys.get(keys[-1])
-            if env_name:
+            if env_name and env_name not in out:
                 out[env_name] = node.strip()
     return out
 
@@ -215,6 +216,28 @@ _CRED_CANDIDATES: list[tuple[str, str, Path, tuple[tuple[str, ...], ...]]] = [
     ("openai",    "gcloud ADC",
         Path.home() / ".config" / "gcloud" / "application_default_credentials.json",
         (("access_token",),)),
+    # Vertex AI / Cloud SDK service-account JSON referenced via
+    # GOOGLE_APPLICATION_CREDENTIALS env var. Different shape — no
+    # `access_token`, has `private_key`, `client_email`, `project_id`.
+    # We CANNOT use this as a bearer against the OpenAI-compat Gemini
+    # endpoint; service-account auth requires JWT assertion. We keep it
+    # as a candidate only so an honest error message can mention the file.
+    # (No `key_paths` snippet is wired up — see `discover_credentials` filter.)
+    ("openai",    "GOOGLE_APPLICATION_CREDENTIALS",
+        Path(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+             or "/dev/null"),
+        (("__none__",),)),
+    # Firebase CLI stores project aliases + refresh tokens. Two schema
+    # variants in the wild:
+    #   modern:  {"apiKey":"...","user":"x","refresh_token":"..."}
+    #   legacy:  {"tokens":{"refresh_token":"..."},"user":"x"}
+    # `apiKey` here is a Firebase web API key, NOT a Gemini bearer.
+    # Auto-routing through Gemini's openai-compat endpoint will fail;
+    # the error path will surface this honestly.
+    ("openai",    "Firebase CLI",
+        Path.home() / ".config" / "firebase" / "firebase-tools-rc.json",
+        (("refresh_token",), ("tokens", "refresh_token"),
+         ("apiKey",), ("currentLogin", "refresh_token"))),
 ]  # noqa: E501
 
 
@@ -584,8 +607,11 @@ def main() -> None:
                   "Hermes Agent (~/.hermes/.env + ~/.hermes/auth.json), "
                   "Gemini CLI (~/.gemini/oauth_creds.json), "
                   "Antigravity CLI (~/.gemini/antigravity-cli/settings.json), "
-                  "or write a ~/.env file. NOTE: Antigravity CLI stores creds "
-                  "in the OS keyring by default, not a file.",
+                  "or write a ~/.env file. NOTE: Antigravity CLI's normal "
+                  "install stores creds in the OS keyring (per the Hermes "
+                  "Agent antigravity-cli skill doc; upstream repo at "
+                  "gazetteer/antigravity-cli — verify), so a keyring-stored "
+                  "Antigravity session is not directly sniffable from disk.",
                   file=sys.stderr)
             sys.exit(1)
 
