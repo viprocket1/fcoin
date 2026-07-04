@@ -1,10 +1,28 @@
+# render.yaml — Render Blueprint
+# One-click deploy: Redis + fcoin web service, wired together automatically.
+#
+# Render reads this file and provisions:
+#   1. A free Redis instance (fcoin-redis)
+#   2. A Python web service (fcoin) with REDIS_URL injected
+#
+# After clicking Deploy, your app is live with persistent wallet state.
+#
+# Docs: https://render.com/docs/blueprint-spec
+
 services:
-  - type: web
-    name: fcoin-agent
-    runtime: python
-    buildCommand: pip install -e ".[sse]"
-    startCommand: python -m src --transport sse --port $PORT
+  - name: fcoin
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: 8080
+      - key: REDIS_URL
+        fromRedis:
+          name: fcoin-redis
+          uriKey: REDIS_URI
+      - key: PYTHON_VERSION
+        value: "3.11"
+
+redis:
+  - name: fcoin-redis
+    plan: free
