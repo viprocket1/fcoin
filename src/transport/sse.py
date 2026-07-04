@@ -296,6 +296,9 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])
     app.mount("/messages/", app=sse_transport.handle_post_message)
 
+    # Capture the async event loop so broadcast() works from background threads
+    market_stream.setup()
+
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server_uvicorn = uvicorn.Server(config)
     try:

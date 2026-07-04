@@ -5,8 +5,11 @@ Non-blocking: trading threads call broadcast() and move on immediately.
 Usage:
     from src.stream import market_stream
 
+    # At startup (in async context):
+    market_stream.setup()
+
     # SSE client connects:
-    await market_stream.subscribe(sse_put, event_filter="trade")
+    await market_stream.subscribe(event_filter="ticker,trade")
 
     # Trading thread fires an event (never blocks):
     market_stream.broadcast({"type": "trade", "data": {...}})
@@ -16,33 +19,32 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Callable, Awaitable
 
 log = logging.getLogger("fcoin.stream")
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Event types that can be streamed
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 MARKET_EVENTS = ("ticker", "orderbook", "trade", "trade_batch")
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Stream subscriber
-# ---------------------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
 @dataclass
 class Subscriber:
     """One SSE client waiting on market_stream.events."""
-    queue:      asyncio.Queue
+    queue:       asyncio.Queue
     event_filter: set[str] | None = None   # None = all events
 
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # MarketStream — global singleton
-# ---------------------------------------------------------------------------
-
+# -----------------------------------------------------------------------------
 class MarketStream:
     """
     Async event bus for live market data.
@@ -60,20 +62,29 @@ class MarketStream:
         self._subs: list[Subscriber] = []
         self._lock = asyncio.Lock()
         self._max_queue = 200   # events per subscriber queue
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._loop_lock = threading.Lock()
 
-    # ------------------------------------------------------------------ public (sync — called from trading threads)
+    def setup(self) -> None:
+        """Call once from the async server startup to capture the event loop."""
+        with self._loop_lock:
+            self._loop = asyncio.get_running_loop()
+        log.info("[stream] event loop captured")
+
+    # ------------------------------------------------------------------------- public (sync — called from trading threads)
 
     def broadcast(self, event: dict) -> None:
         """
         Broadcast an event to all matching subscribers.
         Called from trading threads — MUST NOT block.
         """
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return  # no event loop — not an async context
+        with self._loop_lock:
+            loop = self._loop
 
-        async def _deliver():
+        if loop is None:
+            return  # not set up yet
+
+        async def _deliver() -> None:
             async with self._lock:
                 for sub in self._subs:
                     ev_type = event.get("type")
@@ -83,9 +94,12 @@ class MarketStream:
                         except asyncio.QueueFull:
                             pass  # slow client — drop event
 
-        asyncio.create_task(_deliver())
+        try:
+            asyncio.run_coroutine_threadsafe(_deliver(), loop)
+        except RuntimeError:
+            pass  # loop closed or not running
 
-    # ------------------------------------------------------------------ public (async — called from SSE handlers)
+    # ------------------------------------------------------------------------- public (async — called from SSE handlers)
 
     async def subscribe(
         self,
@@ -121,29 +135,11 @@ class MarketStream:
 
     async def push_to(self, subscriber: Subscriber, put_fn: Callable[[bytes], Awaitable[None]]) -> None:
         """
-        Drain subscriber.queue and send SSE-formatted events via put_fn.
-        Await this coroutine in the SSE handler.
+        DEPRECATED — kept for compatibility. Consumers should read from sub.queue instead.
         """
         while True:
-            try:
-                event = await asyncio.wait_for(subscriber.queue.get(), timeout=30.0)
-                line = f"event: {event.get('type','message')}\ndata: {json.dumps(event)}\n\n"
-                await put_fn(line.encode())
-            except asyncio.TimeoutError:
-                # Send a keepalive ping
-                try:
-                    await put_fn(b": ping\n\n")
-                except Exception:
-                    break
-
-    # ------------------------------------------------------------------ admin
-
-    async def stats(self) -> dict:
-        async with self._lock:
-            return {
-                "subscribers": len(self._subs),
-                "events": list(MARKET_EVENTS),
-            }
+            event = await subscriber.queue.get()
+            await put_fn(json.dumps(event).encode())
 
 
 # Global singleton
