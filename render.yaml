@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: fcoin-agent
+    runtime: python
+    buildCommand: pip install -e .
+    startCommand: python -m src --transport sse --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8080

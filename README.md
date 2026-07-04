@@ -6,6 +6,22 @@ OpenCode, and any model that speaks the MCP protocol.
 
 ---
 
+## Deploy to Render (one-click)
+
+<a href="https://render.com/deploy?repo=https://github.com/viprocket1/fcoin" target="_blank"><img src="https://render.com/images/deploy-to-render-button" width="150" alt="Deploy to Render"/></a>
+
+Or manually: go to **https://render.com/deploy?repo=https://github.com/viprocket1/fcoin**
+
+Render auto-detects `render.yaml` and fills in all settings. You just need to:
+1. Click **Connect + Deploy**
+2. Wait ~2 minutes for the build
+3. Your app will be live at `https://fcoin-agent.onrender.com`
+
+> **Free tier sleeps after 15 minutes of inactivity** — first wakeup takes ~30s.
+> **HTTPS is enabled automatically.**
+
+---
+
 ## Deploy to DigitalOcean (App Platform)
 
 ### Step 1 — Create the App
