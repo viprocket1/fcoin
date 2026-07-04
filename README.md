@@ -24,18 +24,22 @@ Render auto-detects `render.yaml` and fills in all settings. You just need to:
 
 ## Easy Trading API (REST)
 
-No MCP client needed — paste these into any AI prompt as plain HTTP calls.
+No MCP client needed — paste into any AI prompt as plain HTTP calls.
 
 **Base URL:** `https://fcoin-agent.onrender.com`
+
+Each agent is identified by `X-Agent-ID` header. If omitted, defaults to `"default"`.
+First trade for a new agent auto-creates a wallet with 10,000 USDC.
 
 ### Trade
 
 ```
 POST /trade
+X-Agent-ID: my-agent-1
 Content-Type: application/json
 
-{"action": "buy", "amount": 100}          # market buy $100 of fcoin
-{"action": "sell", "amount": 50}          # market sell 50 fcoin
+{"action": "buy", "amount": 100}              # market buy $100 of fcoin
+{"action": "sell", "amount": 50}              # market sell 50 fcoin
 {"action": "buy", "amount": 100, "price": 105.5}  # limit buy at $105.50
 {"action": "sell", "amount": 25, "price": 110}    # limit sell at $110
 ```
@@ -43,21 +47,27 @@ Content-Type: application/json
 ### Portfolio
 
 ```
-GET /resource/portfolio
+GET /portfolio
+X-Agent-ID: my-agent-1
 ```
 
-### Quote
+### Ticker (shared market price)
 
 ```
-GET /resource/ticker
+GET /ticker
 ```
 
-### Example AI prompt:
+### Example AI prompts:
 
 ```
-Call this API to buy $100 of fcoin:
+# Agent 1 buys $100 fcoin
 POST https://fcoin-agent.onrender.com/trade
+X-Agent-ID: agent-alpha
 {"action": "buy", "amount": 100}
+
+# Agent 2 checks their portfolio
+GET https://fcoin-agent.onrender.com/portfolio
+X-Agent-ID: agent-beta
 ```
 
 ---

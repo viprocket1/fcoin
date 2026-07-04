@@ -1,48 +1,32 @@
 """
 MCP trading tools for the fcoin synthetic exchange.
-Exposes the Exchange as JSON-serialisable MCP tool handlers.
+Exposes the ExchangeManager as JSON-serialisable MCP tool handlers.
+
+Agent identification: each MCP session uses a default agent_id. The REST API
+uses X-Agent-ID header to identify agents.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from ..exchange import Exchange, PriceFeed
+from ..exchange import ExchangeManager, init_exchange, get_exchange
 from ..agent import ToolDef
 
 log = logging.getLogger("fcoin.tools")
 
-# ---------------------------------------------------------------------------
-# Singleton exchange instance (shared across all tool calls)
-# ---------------------------------------------------------------------------
+DEFAULT_AGENT = "default"
 
-_exchange: Exchange | None = None
-_price_feed: PriceFeed | None = None
+# Ensure exchange is initialised
+init_exchange()
 
 
-def init_exchange(
-    initial_usdc: float   = 10_000.0,
-    initial_fcoin: float  = 0.0,
-    initial_price: float  = 100.0,
-    volatility: float     = 0.002,
-) -> Exchange:
-    global _exchange, _price_feed
-    if _exchange is None:
-        _price_feed = PriceFeed(initial_price=initial_price, volatility=volatility)
-        _exchange   = Exchange(
-            initial_usdc=initial_usdc,
-            initial_fcoin=initial_fcoin,
-            price_feed=_price_feed,
-        )
-        log.info("Exchange initialised  usdc=%.2f  fcoin=%.4f  price=%.4f",
-                 initial_usdc, initial_fcoin, initial_price)
-    return _exchange
+def _wallet() -> ExchangeManager:
+    return get_exchange()
 
 
-def get_exchange() -> Exchange:
-    if _exchange is None:
-        return init_exchange()
-    return _exchange
+def _agent_trade(action: str, quantity: float, price: float | None = None) -> dict[str, Any]:
+    return _wallet().trade(DEFAULT_AGENT, action, quantity, price)
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +34,7 @@ def get_exchange() -> Exchange:
 # ---------------------------------------------------------------------------
 
 TOOLS: list[ToolDef] = []
+
 
 def _make_tool(name: str, desc: str, schema: dict[str, Any], fn: Any) -> ToolDef:
     td = ToolDef(name=name, description=desc, input_schema=schema, handler=fn)
@@ -67,7 +52,7 @@ _make_tool(
         "properties": {},
         "additionalProperties": False,
     },
-    fn=lambda: {"price": get_exchange().get_market_price()},
+    fn=lambda: _wallet().get_ticker(),
 )
 
 _make_tool(
@@ -80,12 +65,12 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda depth=20: get_exchange().get_orderbook(depth=depth),
+    fn=lambda depth=20: _wallet().get_orderbook(depth=depth),
 )
 
 _make_tool(
     name="get_trades",
-    desc="Get recent trade history.",
+    desc="Get recent trade history for this agent.",
     schema={
         "type": "object",
         "properties": {
@@ -93,7 +78,7 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda limit=50: {"trades": get_exchange().get_trades(limit=limit)},
+    fn=lambda limit=50: {"trades": _wallet().get_portfolio(DEFAULT_AGENT)["trades"][-limit:]},
 )
 
 # ---- Account --------------------------------------------------------------
@@ -108,7 +93,7 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda asset="usdc": get_exchange().get_balance(asset),
+    fn=lambda asset="usdc": _wallet().get_portfolio(DEFAULT_AGENT)[asset],
 )
 
 _make_tool(
@@ -119,18 +104,18 @@ _make_tool(
         "properties": {},
         "additionalProperties": False,
     },
-    fn=lambda: get_exchange().get_position(),
+    fn=lambda: _wallet().get_portfolio(DEFAULT_AGENT)["position"],
 )
 
 _make_tool(
     name="get_open_orders",
-    desc="List all open (unfilled) orders.",
+    desc="List all open (unfilled) orders for this agent.",
     schema={
         "type": "object",
         "properties": {},
         "additionalProperties": False,
     },
-    fn=lambda: {"orders": get_exchange().get_orders(status="open")},
+    fn=lambda: {"orders": _wallet().get_open_orders(DEFAULT_AGENT)},
 )
 
 # ---- Trading --------------------------------------------------------------
@@ -146,9 +131,7 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda quantity: get_exchange().place_order(
-        side="buy", quantity=quantity, order_type="market"
-    ),
+    fn=lambda quantity: _agent_trade("buy", quantity),
 )
 
 _make_tool(
@@ -162,9 +145,7 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda quantity: get_exchange().place_order(
-        side="sell", quantity=quantity, order_type="market"
-    ),
+    fn=lambda quantity: _agent_trade("sell", quantity),
 )
 
 _make_tool(
@@ -179,9 +160,7 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda quantity, price: get_exchange().place_order(
-        side="buy", quantity=quantity, price=price, order_type="limit"
-    ),
+    fn=lambda quantity, price: _agent_trade("buy", quantity, price),
 )
 
 _make_tool(
@@ -196,9 +175,7 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda quantity, price: get_exchange().place_order(
-        side="sell", quantity=quantity, price=price, order_type="limit"
-    ),
+    fn=lambda quantity, price: _agent_trade("sell", quantity, price),
 )
 
 _make_tool(
@@ -212,7 +189,7 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda order_id: get_exchange().cancel_order(order_id),
+    fn=lambda order_id: _wallet().cancel_order(DEFAULT_AGENT, order_id),
 )
 
 # ---- Admin ----------------------------------------------------------------
@@ -228,5 +205,5 @@ _make_tool(
         },
         "additionalProperties": False,
     },
-    fn=lambda price: (_price_feed.set_price(price) if _price_feed else None) or {"price": price},
+    fn=lambda price: _wallet().set_price(price),
 )
