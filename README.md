@@ -8,28 +8,46 @@ OpenCode, and any model that speaks the MCP protocol.
 
 ## Deploy to DigitalOcean (App Platform)
 
-**One-click link (opens in new tab):**
-<a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/viprocket1/fcoin/tree/master" target="_blank">Deploy to DigitalOcean</a>
+### Step 1 — Create the App
 
----
+1. Go to **https://cloud.digitalocean.com/apps/new**
+2. Click **GitHub** under **Launch from GitHub**
+3. Authorize DigitalOcean access to your GitHub account
+4. Under **Repository**, select **`viprocket1/fcoin`**
+5. Branch: **`master`**
+6. Click **Next**
 
-### Step-by-step (for the above link to work, repo must have an `app.yaml` at root — see below)
+### Step 2 — Configure
 
-1. Open the link above — it pre-fills the GitHub repo
-2. Verify branch is **master**
-3. Click **Next** — DO will scan the repo for `app.yaml`
-4. If prompted for settings, fill in:
+On the **Configure App** screen, fill in:
 
-   | Setting | Value |
-   |---|---|
-   | **Build Command** | `pip install --no-cache-dir -e .` |
-   | **Run Command** | `python -m src` |
-   | **HTTP Port** | `8080` |
+| Setting | Value |
+|---|---|
+| **Build Command** | `pip install --no-cache-dir -e .` |
+| **Run Command** | `python -m src --transport sse --port 8080` |
+| **HTTP Port** | `8080` |
 
-5. Under **Health Checks** → set path to `/health`
-6. Click **Create Resource**
+Scroll down to **Health Checks** and set:
 
-> **HTTPS is enabled automatically** — no certbot or nginx needed.
+| Setting | Value |
+|---|---|
+| **Protocol** | `HTTP` |
+| **Path** | `/health` |
+
+Click **Next**.
+
+### Step 3 — Multi-Step Deploy (optional — skip if not shown)
+
+No multi-step needed — click **Create Resource** (or **Create & Restart**).
+
+### Step 4 — Done
+
+Your app deploys. Once live, the URL will be:
+```
+https://fcoin-agent-<random-id>.ondigitalocean.app
+```
+
+> **HTTPS is enabled automatically** — no nginx or certbot needed.
 
 ---
 
