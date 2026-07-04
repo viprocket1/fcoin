@@ -4,7 +4,7 @@
 from .agent import Session, ToolDef, ResourceDef, LLMProvider, Turn
 
 # Exchange
-from .exchange import Exchange, PriceFeed
+from .exchange import ExchangeManager, PriceFeed
 
 # Trading tools
 from .tools.trading import TOOLS, init_exchange, get_exchange
@@ -13,7 +13,7 @@ __all__ = [
     # Agent core
     "Session", "ToolDef", "ResourceDef", "LLMProvider", "Turn",
     # Exchange
-    "Exchange", "PriceFeed",
+    "ExchangeManager", "PriceFeed",
     # Trading tools
     "TOOLS", "init_exchange", "get_exchange",
 ]
