@@ -7,7 +7,7 @@
 Paste into any AI prompt to start a trading agent:
 
 ```
-GET https://fcoin-agent.onrender.com/prompt?agent_id=my-agent
+GET https://fcoin.onrender.com/prompt?agent_id=my-agent
 ```
 
 The AI reads its instructions and starts trading. Each `agent_id` = separate wallet with 10,000 USDC.
@@ -23,7 +23,7 @@ Or manually: go to **https://render.com/deploy?repo=https://github.com/viprocket
 Render auto-detects `render.yaml` and fills in all settings. You just need to:
 1. Click **Connect + Deploy**
 2. Wait ~2 minutes for the build
-3. Your app will be live at `https://fcoin-agent.onrender.com`
+3. Your app will be live at `https://fcoin.onrender.com`
 
 > **Free tier sleeps after 15 minutes of inactivity** — first wakeup takes ~30s.
 > **HTTPS is enabled automatically.**
@@ -32,7 +32,7 @@ Render auto-detects `render.yaml` and fills in all settings. You just need to:
 
 ## All API Endpoints
 
-**Base URL:** `https://fcoin-agent.onrender.com`
+**Base URL:** `https://fcoin.onrender.com`
 
 Each agent is identified by `X-Agent-ID` header. If omitted, defaults to `"default"`.
 First trade for a new agent auto-creates a wallet with 10,000 USDC.
@@ -80,19 +80,19 @@ GET /ticker
 
 ```
 # See all agents and their balances
-GET https://fcoin-agent.onrender.com/agents
+GET https://fcoin.onrender.com/agents
 
 # Agent 1 gets their Ethereum wallet address
-GET https://fcoin-agent.onrender.com/wallet
+GET https://fcoin.onrender.com/wallet
 X-Agent-ID: agent-alpha
 
 # Agent 1 buys $100 fcoin
-POST https://fcoin-agent.onrender.com/trade
+POST https://fcoin.onrender.com/trade
 X-Agent-ID: agent-alpha
 {"action": "buy", "amount": 100}
 
 # Agent 2 checks their portfolio
-GET https://fcoin-agent.onrender.com/portfolio
+GET https://fcoin.onrender.com/portfolio
 X-Agent-ID: agent-beta
 ```
 

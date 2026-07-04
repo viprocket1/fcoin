@@ -187,4 +187,9 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server_uvicorn = uvicorn.Server(config)
-    await server_uvicorn.serve()
+    try:
+        await server_uvicorn.serve()
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        raise
