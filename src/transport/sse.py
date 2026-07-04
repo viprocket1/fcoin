@@ -52,13 +52,58 @@ async def _portfolio(request: Request) -> JSONResponse:
 
 
 async def _wallet(request: Request) -> JSONResponse:
-    """GET /wallet — Ethereum wallet address for this agent (private key not exposed)."""
+    """GET /wallet — Ethereum wallet address for this agent."""
     agent_id = request.headers.get("X-Agent-ID", "default")
     wallet = get_exchange().get_or_create_agent(agent_id)
     return JSONResponse({
         "agent_id": agent_id,
         "address": wallet.address,
-        "private_key": wallet.private_key_hex,  # shown only so agent can sign tx
+        "private_key": wallet.private_key_hex,
+    })
+
+
+async def _prompt(request: Request) -> JSONResponse:
+    """GET /prompt — returns instructions for this agent. Paste the 'url' into any AI and it reads the 'instructions'."""
+    agent_id = request.headers.get("X-Agent-ID", "default")
+    base = str(request.base_url).rstrip("/")
+    instructions = f"""You are a fcoin trading agent.
+Base URL: {base}
+Agent ID: {agent_id}
+
+INSTRUCTIONS:
+1. Get your Ethereum wallet:
+   GET {base}/wallet
+   X-Agent-ID: {agent_id}
+
+2. Check your portfolio:
+   GET {base}/portfolio
+   X-Agent-ID: {agent_id}
+
+3. Get current market price:
+   GET {base}/ticker
+
+4. Buy fcoin (market order):
+   POST {base}/trade
+   X-Agent-ID: {agent_id}
+   Content-Type: application/json
+   {{"action": "buy", "amount": 100}}
+
+5. Sell fcoin (market order):
+   POST {base}/trade
+   X-Agent-ID: {agent_id}
+   {{"action": "sell", "amount": 50}}
+
+6. Limit order (buy at specific price):
+   POST {base}/trade
+   X-Agent-ID: {agent_id}
+   {{"action": "buy", "amount": 100, "price": 105.5}}
+
+Make your own decisions. Start with checking your wallet and portfolio.
+"""
+    return JSONResponse({
+        "agent_id": agent_id,
+        "url": f"{base}/prompt?agent_id={agent_id}",
+        "instructions": instructions,
     })
 
 
@@ -119,6 +164,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/ticker", _ticker, methods=["GET"])
     app.add_route("/portfolio", _portfolio, methods=["GET"])
     app.add_route("/wallet", _wallet, methods=["GET"])
+    app.add_route("/prompt", _prompt, methods=["GET"])
     app.add_route("/trade", lambda r: _trade(r, server), methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.mount("/messages/", app=sse_transport.handle_post_message)

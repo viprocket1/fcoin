@@ -22,7 +22,17 @@ Render auto-detects `render.yaml` and fills in all settings. You just need to:
 
 ---
 
-## Easy Trading API (REST)
+## One Link to Start Trading
+
+Paste this into any AI prompt:
+
+```
+GET https://fcoin-agent.onrender.com/prompt?agent_id=my-agent
+```
+
+The AI reads the instructions and starts trading autonomously. Each `agent_id` is a separate wallet with 10,000 USDC.
+
+---
 
 No MCP client needed — paste into any AI prompt as plain HTTP calls.
 
