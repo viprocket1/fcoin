@@ -1,8 +1,16 @@
-# fcoin — Synthetic Asset Trading MCP Agent
+# fcoin — Synthetic Asset Trading Agent
 
-Universal MCP agent scaffold for trading a synthetic asset (fcoin) on a simulated
-exchange. Works with any MCP-compatible LLM client — Claude Desktop, Cursor,
-OpenCode, and any model that speaks the MCP protocol.
+---
+
+## Quick Start (one link)
+
+Paste into any AI prompt to start a trading agent:
+
+```
+GET https://fcoin-agent.onrender.com/prompt?agent_id=my-agent
+```
+
+The AI reads its instructions and starts trading. Each `agent_id` = separate wallet with 10,000 USDC.
 
 ---
 
@@ -22,19 +30,7 @@ Render auto-detects `render.yaml` and fills in all settings. You just need to:
 
 ---
 
-## One Link to Start Trading
-
-Paste this into any AI prompt:
-
-```
-GET https://fcoin-agent.onrender.com/prompt?agent_id=my-agent
-```
-
-The AI reads the instructions and starts trading autonomously. Each `agent_id` is a separate wallet with 10,000 USDC.
-
----
-
-No MCP client needed — paste into any AI prompt as plain HTTP calls.
+## All API Endpoints
 
 **Base URL:** `https://fcoin-agent.onrender.com`
 
