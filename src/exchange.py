@@ -130,6 +130,12 @@ class OrderBook:
             return None
         return (self.bids[0].price + self.asks[0].price) / 2
 
+    def to_dict(self) -> dict:
+        return {
+            "bids": [{"price": l.price, "quantity": l.quantity} for l in self.bids],
+            "asks": [{"price": l.price, "quantity": l.quantity} for l in self.asks],
+        }
+
     def best_bid(self) -> float | None:
         return self.bids[0].price if self.bids else None
 

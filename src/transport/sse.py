@@ -195,6 +195,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/prompt", _prompt, methods=["GET"])
     app.add_route("/trade", _trade_handler, methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
+    app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])
     app.mount("/messages/", app=sse_transport.handle_post_message)
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
