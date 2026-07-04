@@ -2,7 +2,7 @@ name: fcoin-agent
 region: nyc
 static: false
 http_port: 8080
-build_command: pip install --no-cache-dir -e .
+build_command: pip install --no-cache-dir -e ".[sse]"
 run_command: python -m src --transport sse --port 8080
 health_check:
   path: /health
