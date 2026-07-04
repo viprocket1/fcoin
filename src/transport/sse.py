@@ -136,10 +136,18 @@ async def _trade(request: Request, server: "MCPServer") -> JSONResponse:
     """
     try:
         agent_id = request.headers.get("X-Agent-ID", "default")
-        body = await request.json()
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
         action = body.get("action", "").lower()
-        amount = float(body.get("amount", 0))
-        price = body.get("price")  # None = market order
+        amount_str = body.get("amount", "0")
+        price = body.get("price")
+
+        try:
+            amount = float(amount_str)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "amount must be a number"}, status_code=400)
 
         if amount <= 0:
             return JSONResponse({"error": "amount must be > 0"}, status_code=400)
