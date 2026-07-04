@@ -8,56 +8,12 @@ OpenCode, and any model that speaks the MCP protocol.
 
 ## Deploy to DigitalOcean (App Platform)
 
-### One-click via GitHub Actions (recommended)
+<a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/viprocket1/fcoin" target="_blank"><img src="https://www.digitalocean.com/cdn-cgi/image/format=auto,w=192,h=40/cache=file/digitalocean-ui/media/images/product-pages/base-product-icons/do-btn-blue-logo.svg" alt="Deploy to DigitalOcean"/></a>
 
-This repo includes a GitHub Actions workflow (`.github/deploy.yml`) that deploys to DigitalOcean App Platform on every push to `main`.
-
-**Setup (one-time):**
-
-1. Fork or push this repo to GitHub
-2. Go to [cloud.digitalocean.com](https://cloud.digitalocean.com) → **Create → Apps**
-3. Select **GitHub** → authorize DigitalOcean → pick your `fcoin` repo
-4. Branch: **`main`**
-5. App Platform auto-detects `app.yaml` at the repo root
-6. Confirm the settings below, then click **Create Resource**
-
-### App Settings (auto-populated from `app.yaml`)
-
-| Setting | Value |
-|---|---|
-| **Build Command** | `pip install --no-cache-dir -e .` |
-| **Run Command** | `python -m src` |
-| **HTTP Port** | `8080` |
-| **Health Check** | `GET /health` |
-
-### Manual Deploy (no GitHub Actions)
-
-```bash
-# Clone the repo on a DigitalOcean Droplet
-git clone https://github.com/viprocket1/fcoin.git
-cd fcoin
-docker build -t fcoin-agent .
-docker run -d -p 8080:8080 --restart unless-stopped fcoin-agent
-```
+**Or manually:** select **App Platform → GitHub → your `fcoin` repo → specify `python` as the
+run command and `pip install -e .` as the build command.
 
 > **HTTPS is enabled automatically** on App Platform — no nginx or certbot needed.
-
-### Connect MCP client
-
-Once deployed, your app will be at:
-```
-https://fcoin-agent-<random-id>.ondigitalocean.app
-```
-
-Add to your MCP client config:
-```json
-"mcpServers": {
-  "fcoin": {
-    "url": "https://fcoin-agent-<your-app-name>.ondigitalocean.app/events",
-    "transport": "sse"
-  }
-}
-```
 
 ---
 
