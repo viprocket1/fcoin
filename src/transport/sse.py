@@ -323,6 +323,71 @@ async def _cancel_prompt(request: Request) -> JSONResponse:
         return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=400)
 
 
+async def _register(request: Request) -> JSONResponse:
+    """
+    POST /register — Mint a new agent identity. Returns {agent_id, address, secret}.
+    The agent_id + secret are saved client-side and reused on subsequent runs.
+    Body: {"display_name": "my-bot"} (optional, for human readability)
+    """
+    try:
+        import secrets
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        display_name = body.get("display_name", "")
+
+        ex = get_exchange()
+        # Mint a unique agent_id
+        for _ in range(5):
+            agent_id = "ag_" + secrets.token_hex(6)
+            if agent_id not in ex._wallets and not ex._store.exists(agent_id):
+                break
+        else:
+            return JSONResponse({"error": "could not mint agent_id"}, status_code=500)
+
+        ex.create_agent(agent_id=agent_id, initial_usdc=10_000.0, initial_fcoin=0.0)
+        wallet = ex.get_or_create_agent(agent_id)
+        # Secret for the agent to prove ownership — currently just the agent_id,
+        # but designed so future versions can require it as a header.
+        secret = secrets.token_hex(16)
+
+        return JSONResponse({
+            "agent_id":     agent_id,
+            "address":      wallet.address,
+            "secret":       secret,
+            "display_name": display_name,
+            "initial_usdc": 10_000.0,
+            "created_at":   __import__("time").time(),
+        })
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _recover(request: Request) -> JSONResponse:
+    """
+    POST /recover — Look up an existing agent by ID + secret.
+    Returns the agent's portfolio so the client can verify it's the right one.
+    Body: {"agent_id": "ag_...", "secret": "..."}
+    """
+    try:
+        body = await request.json()
+        agent_id = body.get("agent_id", "")
+        # secret = body.get("secret", "")    # accepted but not verified yet
+
+        ex = get_exchange()
+        wallet = ex.get_or_create_agent(agent_id)
+        return JSONResponse({
+            "agent_id":  agent_id,
+            "address":   wallet.address,
+            "portfolio": ex.get_portfolio(agent_id),
+        })
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=400)
+
+
 async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) -> None:
     if SseServerTransport is None:
         raise ImportError(
@@ -392,6 +457,8 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/prompts", _list_prompts, methods=["GET"])
     app.add_route("/prompt/{id}", _get_prompt, methods=["GET"])
     app.add_route("/prompt/{id}", _cancel_prompt, methods=["DELETE"])
+    app.add_route("/register", _register, methods=["POST"])
+    app.add_route("/recover", _recover, methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.add_route("/stream", handle_market_stream, methods=["GET"])
     app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])

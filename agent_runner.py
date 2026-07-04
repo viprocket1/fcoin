@@ -32,6 +32,38 @@ from typing import Optional
 
 
 # -----------------------------------------------------------------------------
+# Local identity persistence
+# -----------------------------------------------------------------------------
+import os
+from pathlib import Path
+
+IDENTITY_FILE = Path.home() / ".fcoin" / "agent.json"
+
+
+def load_identity(base_url: str) -> dict | None:
+    """Load saved identity for this base_url, or None."""
+    if not IDENTITY_FILE.exists():
+        return None
+    try:
+        data = json.loads(IDENTITY_FILE.read_text())
+        if data.get("base_url") == base_url:
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def save_identity(identity: dict) -> None:
+    """Persist identity to ~/.fcoin/agent.json."""
+    IDENTITY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    IDENTITY_FILE.write_text(json.dumps(identity, indent=2))
+    try:
+        os.chmod(IDENTITY_FILE, 0o600)  # owner-only — contains secret
+    except Exception:
+        pass
+
+
+# -----------------------------------------------------------------------------
 # HTTP helpers
 # -----------------------------------------------------------------------------
 def http_post(url: str, body: dict, headers: dict = None) -> dict:
@@ -138,7 +170,46 @@ def main() -> None:
                         help="Skip prompts below this USDC fee")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print responses but don't POST them back")
+    parser.add_argument("--reset", action="store_true",
+                        help="Forget saved identity and mint a new agent")
+    parser.add_argument("--show-identity", action="store_true",
+                        help="Print the saved agent_id and exit")
     args = parser.parse_args()
+
+    base_url = args.base_url.rstrip("/")
+
+    # Reset clears local identity
+    if args.reset and IDENTITY_FILE.exists():
+        IDENTITY_FILE.unlink()
+        print(f"[identity] reset  removed {IDENTITY_FILE}")
+
+    # Show-and-exit
+    if args.show_identity:
+        ident = load_identity(base_url)
+        if ident is None:
+            print("[identity] none saved")
+        else:
+            print(f"[identity] agent_id={ident['agent_id']}  address={ident.get('address')}")
+        return
+
+    # Load or mint identity
+    identity = load_identity(base_url)
+    if identity is None:
+        print(f"[identity] none saved — registering new agent at {base_url} ...")
+        try:
+            identity = http_post(f"{base_url}/register", {"display_name": args.agent_id})
+            identity["base_url"] = base_url
+            save_identity(identity)
+            print(f"[identity] registered  agent_id={identity['agent_id']}")
+            print(f"[identity] address={identity.get('address')}")
+            print(f"[identity] saved to {IDENTITY_FILE}")
+        except Exception as exc:
+            print(f"[identity] registration failed: {exc}", file=sys.stderr)
+            sys.exit(1)
+        args.agent_id = identity["agent_id"]
+    else:
+        args.agent_id = identity["agent_id"]
+        print(f"[identity] loaded  agent_id={args.agent_id}  address={identity.get('address')}")
 
     # Auto-detect provider
     provider = args.provider
