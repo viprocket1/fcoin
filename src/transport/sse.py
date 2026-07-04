@@ -254,8 +254,8 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
         sub = await market_stream.subscribe(put_fn=None, event_filter=filter_str)
 
         async def event_generator():
-            yield b"event: connected\ndata: {\"type\":\"connected\",\"events\":[" + \
-                ",".join(f'"{e}"' for e in filter_str.split(",")) + b"]}\n\n"
+            initial = json.dumps({"type": "connected", "events": filter_str.split(",")}).encode()
+            yield b"event: connected\ndata: " + initial + b"\n\n"
             try:
                 while True:
                     try:
