@@ -20,6 +20,7 @@ log = logging.getLogger("fcoin.mcp.sse")
 
 try:
     from mcp.server.sse import SseServerTransport
+    from ..tools import get_exchange
     from starlette.applications import Starlette
     from starlette.routing import Route, Mount
     from starlette.requests import Request
@@ -34,6 +35,51 @@ except ImportError:
 async def _health(request: Request) -> JSONResponse:
     """GET /health — DigitalOcean App Platform / Render health check."""
     return JSONResponse({"status": "ok"})
+
+
+async def _portfolio(request: Request) -> JSONResponse:
+    """GET /portfolio — account balances and positions."""
+    ex = get_exchange()
+    return JSONResponse({
+        "usdc": ex.get_balance("usdc"),
+        "fcoin": ex.get_balance("fcoin"),
+        "position": ex.get_position(),
+    })
+
+
+async def _ticker(request: Request) -> JSONResponse:
+    """GET /ticker — current market price."""
+    ex = get_exchange()
+    return JSONResponse(ex.get_market_price())
+
+
+async def _trade(request: Request, server: "MCPServer") -> JSONResponse:
+    """
+    POST /trade — Execute a trade with simple JSON.
+    Body: {"action": "buy"|"sell", "amount": float, "price"?: float}
+    No LLM needed — direct market/limit order execution.
+    """
+    body = await request.json()
+    action = body.get("action", "").lower()
+    amount = float(body.get("amount", 0))
+    price = body.get("price")  # None = market order
+
+    if amount <= 0:
+        return JSONResponse({"error": "amount must be > 0"}, status_code=400)
+    if action not in ("buy", "sell"):
+        return JSONResponse({"error": "action must be 'buy' or 'sell'"}, status_code=400)
+
+    from ..tools import get_exchange
+    ex = get_exchange()
+    try:
+        if price is None:
+            result = ex.place_order(side=action, quantity=amount, order_type="market")
+        else:
+            result = ex.place_order(side=action, quantity=amount, price=float(price), order_type="limit")
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+
+    return JSONResponse({"status": "ok", "trade": action, "amount": amount, "price": price, "result": result})
 
 
 async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) -> None:
@@ -58,6 +104,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
 
     app = Starlette()
     app.add_route("/health", _health, methods=["GET"])
+    app.add_route("/trade", lambda r: _trade(r, server), methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.mount("/messages/", app=sse_transport.handle_post_message)
 

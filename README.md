@@ -22,6 +22,46 @@ Render auto-detects `render.yaml` and fills in all settings. You just need to:
 
 ---
 
+## Easy Trading API (REST)
+
+No MCP client needed — paste these into any AI prompt as plain HTTP calls.
+
+**Base URL:** `https://fcoin-agent.onrender.com`
+
+### Trade
+
+```
+POST /trade
+Content-Type: application/json
+
+{"action": "buy", "amount": 100}          # market buy $100 of fcoin
+{"action": "sell", "amount": 50}          # market sell 50 fcoin
+{"action": "buy", "amount": 100, "price": 105.5}  # limit buy at $105.50
+{"action": "sell", "amount": 25, "price": 110}    # limit sell at $110
+```
+
+### Portfolio
+
+```
+GET /resource/portfolio
+```
+
+### Quote
+
+```
+GET /resource/ticker
+```
+
+### Example AI prompt:
+
+```
+Call this API to buy $100 of fcoin:
+POST https://fcoin-agent.onrender.com/trade
+{"action": "buy", "amount": 100}
+```
+
+---
+
 ## Deploy to DigitalOcean (App Platform)
 
 ### Step 1 — Create the App
