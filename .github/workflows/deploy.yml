@@ -1,0 +1,18 @@
+name: Deploy to DigitalOcean App Platform
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to DigitalOcean App Platform
+        uses: digitalocean/app-refresh-action@v1
+        with:
+          app_id: ${{ secrets.DO_APP_ID }}
+          token: ${{ secrets.DO_API_TOKEN }}
