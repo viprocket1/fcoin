@@ -134,24 +134,25 @@ async def _trade(request: Request, server: "MCPServer") -> JSONResponse:
     Header: X-Agent-ID: <agent-id>  (auto-created if missing)
     Body: {"action": "buy"|"sell", "amount": float, "price"?: float}
     """
-    agent_id = request.headers.get("X-Agent-ID", "default")
-    body = await request.json()
-    action = body.get("action", "").lower()
-    amount = float(body.get("amount", 0))
-    price = body.get("price")  # None = market order
-
-    if amount <= 0:
-        return JSONResponse({"error": "amount must be > 0"}, status_code=400)
-    if action not in ("buy", "sell"):
-        return JSONResponse({"error": "action must be 'buy' or 'sell'"}, status_code=400)
-
-    ex = get_exchange()
     try:
-        result = ex.trade(agent_id, action, amount, price)
-    except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
+        agent_id = request.headers.get("X-Agent-ID", "default")
+        body = await request.json()
+        action = body.get("action", "").lower()
+        amount = float(body.get("amount", 0))
+        price = body.get("price")  # None = market order
 
-    return JSONResponse({"agent_id": agent_id, "status": "ok", **result})
+        if amount <= 0:
+            return JSONResponse({"error": "amount must be > 0"}, status_code=400)
+        if action not in ("buy", "sell"):
+            return JSONResponse({"error": "action must be 'buy' or 'sell'"}, status_code=400)
+
+        ex = get_exchange()
+        result = ex.trade(agent_id, action, amount, price)
+        return JSONResponse({"agent_id": agent_id, "status": "ok", **result})
+    except Exception as exc:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
 
 
 async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) -> None:
