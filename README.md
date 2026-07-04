@@ -8,7 +8,7 @@ OpenCode, and any model that speaks the MCP protocol.
 
 ## Deploy to DigitalOcean (App Platform)
 
-<a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/viprocket1/fcoin" target="_blank"><img src="https://www.digitalocean.com/cdn-cgi/image/format=auto,w=192,h=40/cache=file/digitalocean-ui/media/images/product-pages/base-product-icons/do-btn-blue-logo.svg" alt="Deploy to DigitalOcean"/></a>
+<a href="https://cloud.digitalocean.com/apps/new?repo=https://github.com/viprocket1/fcoin/tree/main" target="_blank"><img src="https://www.digitalocean.com/cdn-cgi/image/format=auto,w=192,h=40/cache=file/digitalocean-ui/media/images/product-pages/base-product-icons/do-btn-blue-logo.svg" alt="Deploy to DigitalOcean"/></a>
 
 **Or manually:** select **App Platform → GitHub → your `fcoin` repo → specify `python` as the
 run command and `pip install -e .` as the build command.
