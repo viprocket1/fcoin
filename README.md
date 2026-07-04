@@ -76,6 +76,28 @@ promoted: those JSON files have no raw bearer — they need a JWT-based
 assertion flow (`gcloud auth activate-service-account` or a SDK). Sniffer
 mentions the file in the error message so users know to convert it.
 
+### Antigravity IDE
+
+`rune` runs unchanged inside Antigravity IDE's terminal panel — it's a
+plain `bash` + `python3` shim with no IDE-specific coupling. Per the official
+Antigravity CLI docs (referenced in the Hermes skill pack at
+`.hermes/hermes-agent/optional-skills/autonomous-ai-agents/antigravity-cli/references/cli-docs.md`):
+
+- Antigravity installer: `https://antigravity.google/cli/install.sh`
+- `~/.gemini/antigravity-cli/settings.json` holds app config (sandbox,
+  model, permissions) — **not** credentials.
+- Auth uses the OS secure keyring (Linux: `libsecret`/Secret Service;
+  macOS: Keychain; Windows: Credential Manager). Browser OAuth fallback
+  when no saved session.
+- `/logout` clears the keyring entry; `export GOOGLE_API_KEY=...` is the
+  standard recovery path when the keyring isn't reachable from another tool.
+
+Since the keyring isn't sniffable from a Python process, Antigravity IDE's
+own auth doesn't flow into `rune` automatically. To reuse an Antigravity
+session, either (a) `export GOOGLE_API_KEY` after authenticating in the IDE
+or (b) keep `~/.gemini/antigravity-cli/settings.json` populated — the
+sniffer already reads `apiKey` / `auth.apiKey` if present.
+
 Explicit env vars always win over sniffs. `agent_runner.py` keeps the agent
 identity in `~/.fcoin/agent.json` (mode 0600) and reconnects automatically. Run
 `--show-identity` to print the saved id, `--reset` to mint a new one.
