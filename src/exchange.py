@@ -161,7 +161,10 @@ class OrderBook:
 # ---------------------------------------------------------------------------
 
 class AgentWallet:
-    """Isolated balances, orders, and trades for a single agent."""
+    """
+    Isolated balances, orders, and trades for a single agent.
+    Includes an Ethereum-style secp256k1 wallet (address + private key).
+    """
 
     DEFAULT_INITIAL_USDC  = 10_000.0
     DEFAULT_INITIAL_FCOIN = 0.0
@@ -171,6 +174,7 @@ class AgentWallet:
         agent_id:   str,
         initial_usdc:  float = DEFAULT_INITIAL_USDC,
         initial_fcoin: float = DEFAULT_INITIAL_FCOIN,
+        priv_key: bytes | None = None,
     ):
         self.agent_id   = agent_id
         self._balances: dict[str, Balance] = {
@@ -180,6 +184,56 @@ class AgentWallet:
         self._orders:   dict[str, Order] = {}
         self._trades:   list[Trade]      = []
         self._order_cnt = 0
+        # Ethereum-style wallet
+        self._key = self._generate_key(priv_key)
+
+    # ---------------------------------------------------------------------------
+    # Ethereum wallet
+    # ---------------------------------------------------------------------------
+
+    def _generate_key(self, priv_key: bytes | None) -> bytes:
+        """Generate or validate a 32-byte secp256k1 private key."""
+        import hashlib
+        import hmac
+        if priv_key is not None:
+            if len(priv_key) != 32:
+                raise ValueError("Private key must be 32 bytes")
+            return priv_key
+        # Generate random 32 bytes using HMAC-DRBG seeded from os.urandom
+        seed = hashlib.sha256(__import__("os").urandom(32)).digest()
+        ctx = hmac.new(seed, b"secp256k1", hashlib.sha256).digest()
+        return ctx
+
+    @property
+    def private_key_hex(self) -> str:
+        """Raw private key as 0x-prefixed hex string. Keep secret!"""
+        return "0x" + self._key.hex()
+
+    @property
+    def address(self) -> str:
+        """Ethereum-style address derived from public key (Keccak-256)."""
+        import hashlib
+        p = self._derive_public_key()
+        try:
+            h = hashlib.sha3_256(p).digest()
+        except AttributeError:
+            import sha3
+            h = sha3.sha3_256(p).digest()
+        return "0x" + h[-20:].hex()
+
+    def _derive_public_key(self) -> bytes:
+        """Derive uncompressed secp256k1 public key bytes (0x04 || x || y)."""
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives import serialization
+        pk = ec.derive_private_key(int.from_bytes(self._key, "big"), ec.SECP256K1(), default_backend())
+        pub = pk.public_key()
+        # Uncompressed: 0x04 || x || y
+        return b"\x04" + pub.public_numbers().x.to_bytes(32, "big") + pub.public_numbers().y.to_bytes(32, "big")
+
+    # ---------------------------------------------------------------------------
+    # Trading API
+    # ---------------------------------------------------------------------------
 
     def get_balance(self, asset: str) -> dict[str, float]:
         b = self._balances.get(asset, Balance())
@@ -480,6 +534,7 @@ class ExchangeManager:
         price  = self._price_feed.get_price()
         return {
             "agent_id": agent_id,
+            "address":  wallet.address,
             "usdc":     wallet.get_balance("usdc"),
             "fcoin":    wallet.get_balance("fcoin"),
             "position": wallet.get_position(price),

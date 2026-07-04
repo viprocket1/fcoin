@@ -17,6 +17,7 @@ dev = [
     "mypy",
 ]
 sse = [
+    "cryptography",
     "sse-starlette",
     "uvicorn[standard]",
 ]

@@ -60,6 +60,10 @@ GET /ticker
 ### Example AI prompts:
 
 ```
+# Agent 1 gets their Ethereum wallet address
+GET https://fcoin-agent.onrender.com/wallet
+X-Agent-ID: agent-alpha
+
 # Agent 1 buys $100 fcoin
 POST https://fcoin-agent.onrender.com/trade
 X-Agent-ID: agent-alpha

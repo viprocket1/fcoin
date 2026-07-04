@@ -44,9 +44,21 @@ async def _portfolio(request: Request) -> JSONResponse:
     portfolio = ex.get_portfolio(agent_id)
     return JSONResponse({
         "agent_id": agent_id,
+        "address": portfolio["address"],
         "usdc": portfolio["usdc"],
         "fcoin": portfolio["fcoin"],
         "position": portfolio["position"],
+    })
+
+
+async def _wallet(request: Request) -> JSONResponse:
+    """GET /wallet — Ethereum wallet address for this agent (private key not exposed)."""
+    agent_id = request.headers.get("X-Agent-ID", "default")
+    wallet = get_exchange().get_or_create_agent(agent_id)
+    return JSONResponse({
+        "agent_id": agent_id,
+        "address": wallet.address,
+        "private_key": wallet.private_key_hex,  # shown only so agent can sign tx
     })
 
 
@@ -106,6 +118,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/health", _health, methods=["GET"])
     app.add_route("/ticker", _ticker, methods=["GET"])
     app.add_route("/portfolio", _portfolio, methods=["GET"])
+    app.add_route("/wallet", _wallet, methods=["GET"])
     app.add_route("/trade", lambda r: _trade(r, server), methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.mount("/messages/", app=sse_transport.handle_post_message)

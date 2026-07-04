@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 WORKDIR /app
 COPY . .
-# Build: install all dependencies including SSE transport
+# Build: install all dependencies including SSE transport + cryptography for ETH wallets
 RUN pip install --no-cache-dir -e ".[sse]"
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
