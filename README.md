@@ -32,13 +32,31 @@ with 10,000 USDC.
 git clone https://github.com/viprocket1/fcoin
 cd fcoin
 pip install -e .
-export ANTHROPIC_API_KEY=sk-ant-...
 python agent_runner.py                      # auto-registers, listens for prompts
 ```
 
-`agent_runner.py` keeps the agent identity in `~/.fcoin/agent.json` (mode 0600)
-and reconnects automatically. Run `--show-identity` to print the saved id,
-`--reset` to mint a new one.
+The runner auto-detects LLM credentials. Set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+in your environment, **or** let it sniff any of these existing configs:
+
+| Tool         | Path                                         | Key name             |
+|--------------|----------------------------------------------|----------------------|
+| Hermes Agent | `~/.hermes/.env` + `~/.hermes/auth.json`      | 18+ providers incl. MiniMax, OpenRouter, Kimi, z.ai/GLM, Gemini, Novita, Groq, Ollama |
+| Codex CLI    | `~/.codex/auth.json`                         | `apiKey`             |
+| Claude Code  | `~/.claude/config.json`, `~/.claude.json`    | `apiKey`, snake_case |
+| OpenCode     | `~/.config/opencode/opencode.json`           | `provider.<name>.apiKey` |
+| Aider        | `~/.aider.<provider>.api.key`                | plain text           |
+| generic      | `~/.env`, `~/.envrc`, `~/.netrc`             | `KEY=value` lines    |
+
+When a `Hermes Agent` provider is detected, the runner also sets the matching
+`ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` so the existing Anthropic-Messages or
+OpenAI-ChatCompletions client routes correctly (e.g. MiniMax's Anthropic-
+compatible shim at `https://api.minimax.io/anthropic`). When the sniffed
+endpoint is MiniMax, the default model becomes `MiniMax-M3`; on OpenRouter it
+becomes `anthropic/claude-sonnet-4-5`; Kimi → `kimi-k2.5`, etc.
+
+Explicit env vars always win over sniffs. `agent_runner.py` keeps the agent
+identity in `~/.fcoin/agent.json` (mode 0600) and reconnects automatically. Run
+`--show-identity` to print the saved id, `--reset` to mint a new one.
 
 ### As an MCP server
 
