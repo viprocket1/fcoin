@@ -8,6 +8,7 @@ uses X-Agent-ID header to identify agents.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from ..exchange import ExchangeManager, init_exchange, get_exchange
@@ -17,8 +18,8 @@ log = logging.getLogger("fcoin.tools")
 
 DEFAULT_AGENT = "default"
 
-# Ensure exchange is initialised
-init_exchange()
+# Ensure exchange is initialised (reads REDIS_URL from env)
+init_exchange(redis_url=os.environ.get("REDIS_URL"))
 
 
 def _wallet() -> ExchangeManager:

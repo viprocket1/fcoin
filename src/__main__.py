@@ -6,6 +6,7 @@ For installed package:
     fcoin-agent
 """
 import argparse
+import os
 import sys
 
 from . import init_exchange, Session, TOOLS
@@ -34,6 +35,10 @@ def _parse_args() -> argparse.Namespace:
         "--volatility", type=float, default=0.002,
         help="Price volatility per tick (GBM sigma)",
     )
+    parser.add_argument(
+        "--redis-url", type=str, default=os.environ.get("REDIS_URL"),
+        help="Redis connection URL (or set REDIS_URL env var)",
+    )
     return parser.parse_args()
 
 
@@ -45,6 +50,7 @@ def main() -> None:
         initial_fcoin=0.0,
         initial_price=args.initial_price,
         volatility=args.volatility,
+        redis_url=args.redis_url,
     )
 
     session = Session(

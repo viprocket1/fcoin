@@ -7,6 +7,7 @@ dependencies = [
     "mcp>=1.0.0",
     "httpx",
     "anyio>=4.0",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]

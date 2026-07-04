@@ -485,6 +485,196 @@ class AgentWallet:
             quantity=order.filled,
         ))
 
+    # ---------------------------------------------------------------------------
+    # Sync to persistent store (called by ExchangeManager after mutations)
+    # ---------------------------------------------------------------------------
+
+    def sync_to_store(self, store: RedisWalletStore) -> None:
+        """Persist current balances, orders, and trades to the store."""
+        store.set_available_usdc(self.agent_id, self._available_usdc)
+        store.set_available_fcoin(self.agent_id, self._available_fcoin)
+        orders = [
+            {
+                "id":           o.id,
+                "agent_id":     o.agent_id,
+                "side":         o.side.value,
+                "order_type":   o.order_type.value,
+                "price":        o.price,
+                "quantity":     o.quantity,
+                "filled":       o.filled,
+                "status":       o.status,
+                "created_at":   o.created_at,
+            }
+            for o in self._orders.values()
+        ]
+        store.save_orders(self.agent_id, orders)
+        trades = [
+            {
+                "id":         t.id,
+                "agent_id":   t.agent_id,
+                "order_id":   t.order_id,
+                "side":       t.side.value,
+                "price":      t.price,
+                "quantity":   t.quantity,
+                "created_at": t.created_at,
+            }
+            for t in self._trades
+        ]
+        store.save_trades(self.agent_id, trades)
+
+
+# ---------------------------------------------------------------------------
+# Redis wallet store — wallets persisted across process restarts
+# ---------------------------------------------------------------------------
+
+import json
+import redis
+
+
+class RedisWalletStore:
+    """
+    AgentWallet storage backed by Redis hashes.
+
+    Each agent's state is a Redis hash:
+      WALLET:{agent_id} → {field: value, ...}
+      ORDERS:{agent_id}  → JSON list of order dicts
+      TRADES:{agent_id}  → JSON list of trade dicts
+
+    Falls back to in-process dict if REDIS_URL is not set, so the same code
+    works locally (no Redis) and in production (with Redis).
+    """
+
+    WALLET_KEY  = "WALLET:{agent_id}"
+    ORDERS_KEY  = "ORDERS:{agent_id}"
+    TRADES_KEY  = "TRADES:{agent_id}"
+
+    def __init__(self, redis_url: str | None = None):
+        self._local_wallets: dict[str, dict[str, str]] = {}  # agent_id → field→value
+        self._local_orders:  dict[str, str] = {}              # agent_id → JSON list
+        self._local_trades:  dict[str, str] = {}              # agent_id → JSON list
+        self._redis: redis.Redis | None = None
+        if redis_url:
+            try:
+                self._redis = redis.from_url(redis_url, decode_responses=True)
+                self._redis.ping()
+                log.info("RedisWalletStore connected  url=%s", redis_url.split(":")[2] if ":" in redis_url else "...")
+            except Exception as exc:
+                log.warning("Redis unavailable, using in-process store: %s", exc)
+                self._redis = None
+
+    # ---- wallet-level ops --------------------------------------------------
+
+    def _wallet_key(self, agent_id: str) -> str:
+        return self.WALLET_KEY.format(agent_id=agent_id)
+
+    def _orders_key(self, agent_id: str) -> str:
+        return self.ORDERS_KEY.format(agent_id=agent_id)
+
+    def _trades_key(self, agent_id: str) -> str:
+        return self.TRADES_KEY.format(agent_id=agent_id)
+
+    def _hset_num(self, key: str, field: str, value: float) -> None:
+        if self._redis:
+            self._redis.hset(key, field, str(value))
+        else:
+            self._local_wallets.setdefault(key, {})[field] = str(value)
+
+    def _hget_num(self, key: str, field: str) -> float:
+        if self._redis:
+            val = self._redis.hget(key, field)
+            return float(val) if val is not None else 0.0
+        return float(self._local_wallets.get(key, {}).get(field, "0.0"))
+
+    def _hget_str(self, key: str, field: str) -> str | None:
+        if self._redis:
+            return self._redis.hget(key, field)
+        return self._local_wallets.get(key, {}).get(field)
+
+    # ---- public store API -------------------------------------------------
+
+    def exists(self, agent_id: str) -> bool:
+        k = self._wallet_key(agent_id)
+        if self._redis:
+            return bool(self._redis.exists(k))
+        return k in self._local_wallets
+
+    def create_wallet(
+        self,
+        agent_id: str,
+        available_usdc: float,
+        available_fcoin: float,
+        order_cnt: int,
+    ) -> None:
+        k = self._wallet_key(agent_id)
+        data = {
+            "agent_id":         agent_id,
+            "available_usdc":   str(available_usdc),
+            "available_fcoin":  str(available_fcoin),
+            "order_cnt":        str(order_cnt),
+        }
+        if self._redis:
+            self._redis.hset(k, mapping=data)
+        else:
+            self._local_wallets[k] = data
+
+    def get_available_usdc(self, agent_id: str) -> float:
+        return self._hget_num(self._wallet_key(agent_id), "available_usdc")
+
+    def get_available_fcoin(self, agent_id: str) -> float:
+        return self._hget_num(self._wallet_key(agent_id), "available_fcoin")
+
+    def set_available_usdc(self, agent_id: str, value: float) -> None:
+        self._hset_num(self._wallet_key(agent_id), "available_usdc", value)
+
+    def set_available_fcoin(self, agent_id: str, value: float) -> None:
+        self._hset_num(self._wallet_key(agent_id), "available_fcoin", value)
+
+    def get_order_cnt(self, agent_id: str) -> int:
+        val = self._hget_str(self._wallet_key(agent_id), "order_cnt")
+        return int(val) if val else 0
+
+    def incr_order_cnt(self, agent_id: str) -> int:
+        k = self._wallet_key(agent_id)
+        if self._redis:
+            n = self._redis.hincrby(k, "order_cnt", 1)
+        else:
+            d = self._local_wallets.setdefault(k, {})
+            n = int(d.get("order_cnt", "0")) + 1
+            d["order_cnt"] = str(n)
+        return n
+
+    # ---- orders ------------------------------------------------------------
+
+    def get_orders(self, agent_id: str) -> list[dict]:
+        k = self._orders_key(agent_id)
+        if self._redis:
+            raw = self._redis.get(k)
+            return json.loads(raw) if raw else []
+        return json.loads(self._local_orders.get(k, "[]"))
+
+    def save_orders(self, agent_id: str, orders: list[dict]) -> None:
+        k = self._orders_key(agent_id)
+        if self._redis:
+            self._redis.set(k, json.dumps(orders))
+        else:
+            self._local_orders[k] = json.dumps(orders)
+
+    # ---- trades ------------------------------------------------------------
+
+    def get_trades(self, agent_id: str) -> list[dict]:
+        k = self._trades_key(agent_id)
+        if self._redis:
+            raw = self._redis.get(k)
+            return json.loads(raw) if raw else []
+        return json.loads(self._local_trades.get(k, "[]"))
+
+    def save_trades(self, agent_id: str, trades: list[dict]) -> None:
+        k = self._trades_key(agent_id)
+        if self._redis:
+            self._redis.set(k, json.dumps(trades))
+        else:
+            self._local_trades[k] = json.dumps(trades)
+
 
 # ---------------------------------------------------------------------------
 # ExchangeManager — manages per-agent wallets with a shared market
@@ -514,7 +704,7 @@ class ExchangeManager:
     __slots__ = (
         "_price_feed", "_wallets", "_book",
         "_maker_fee", "_taker_fee", "_refresh_interval",
-        "_book_lock", "_running", "_thread",
+        "_book_lock", "_running", "_thread", "_store",
     )
 
     def __init__(
@@ -524,7 +714,8 @@ class ExchangeManager:
         maker_fee:          float = 0.001,
         taker_fee:          float = 0.001,
         seed:               int | None = None,
-        refresh_interval:   float = 1.0,   # seconds between book refreshes
+        refresh_interval:   float = 1.0,
+        redis_url:          str | None = None,   # NEW: persist wallets to Redis
     ):
         self._price_feed      = PriceFeed(
             initial_price=initial_price,
@@ -539,8 +730,10 @@ class ExchangeManager:
         self._refresh_interval     = refresh_interval
         self._running              = False
         self._thread: threading.Thread | None = None
+        self._store                = RedisWalletStore(redis_url)
         self._refresh_book()
-        log.info("ExchangeManager initialised  price=%.4f", initial_price)
+        log.info("ExchangeManager initialised  price=%.4f  redis=%s",
+                 initial_price, "yes" if redis_url else "no (in-process)")
 
     # ---------------------------------------------------------------------------
     # Agent management
@@ -566,10 +759,22 @@ class ExchangeManager:
         return agent_id
 
     def get_or_create_agent(self, agent_id: str) -> AgentWallet:
-        """Return existing wallet or create a new one with defaults."""
-        # Fast path — dict lookup is thread-safe for read-only
+        """Return existing wallet or create/load one with defaults."""
+        # Fast path — in-process cache
         wallet = self._wallets.get(agent_id)
         if wallet is not None:
+            return wallet
+        # Check persisted store (cold start after restart)
+        if self._store.exists(agent_id):
+            wallet = AgentWallet(agent_id=agent_id)
+            wallet._available_usdc  = self._store.get_available_usdc(agent_id)
+            wallet._available_fcoin = self._store.get_available_fcoin(agent_id)
+            wallet._order_cnt = self._store.get_order_cnt(agent_id)
+            # Re-hydrate balances dict so get_balance() works
+            wallet._balances["usdc"].available  = wallet._available_usdc
+            wallet._balances["fcoin"].available = wallet._available_fcoin
+            self._wallets[agent_id] = wallet
+            log.info("Agent loaded from store  id=%s", agent_id)
             return wallet
         return self._wallets.setdefault(
             agent_id,
@@ -629,20 +834,24 @@ class ExchangeManager:
                 exec_price = best_ask if best_ask is not None else self._price_feed.get_price()
             else:
                 exec_price = best_bid if best_bid is not None else self._price_feed.get_price()
-            return wallet.execute_market_order(
+            result = wallet.execute_market_order(
                 side=action,
                 quantity=quantity,
                 exec_price=exec_price,
                 fee_rate=self._taker_fee,
             )
+            wallet.sync_to_store(self._store)
+            return result
         else:
-            return wallet.place_order(
+            result = wallet.place_order(
                 side=action,
                 quantity=quantity,
                 price=price,
                 order_type=order_type,
                 fee_rate=self._taker_fee,
             )
+            wallet.sync_to_store(self._store)
+            return result
 
     def get_portfolio(self, agent_id: str) -> dict[str, Any]:
         """Get an agent's portfolio (auto-creates wallet if needed)."""
@@ -727,12 +936,14 @@ def init_exchange(
     initial_price: float = 100.0,
     volatility:    float = 0.002,
     agent_id:      str | None = None,
+    redis_url:     str | None = None,   # NEW
 ) -> ExchangeManager:
     global _exchange_manager
     if _exchange_manager is None:
         _exchange_manager = ExchangeManager(
             initial_price=initial_price,
             volatility=volatility,
+            redis_url=redis_url,
         )
         _exchange_manager.start_background_refresh()
     if agent_id:
