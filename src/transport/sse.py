@@ -183,6 +183,9 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
             )
         return Response()
 
+    async def _trade_handler(request: Request) -> JSONResponse:
+        return await _trade(request, server)
+
     app = Starlette()
     app.add_route("/health", _health, methods=["GET"])
     app.add_route("/ticker", _ticker, methods=["GET"])
@@ -190,7 +193,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/wallet", _wallet, methods=["GET"])
     app.add_route("/agents", _agents, methods=["GET"])
     app.add_route("/prompt", _prompt, methods=["GET"])
-    app.add_route("/trade", lambda r: _trade(r, server), methods=["POST"])
+    app.add_route("/trade", _trade_handler, methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.mount("/messages/", app=sse_transport.handle_post_message)
 
