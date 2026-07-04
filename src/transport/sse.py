@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..server import MCPServer
 
+from ..stream import market_stream
+
 log = logging.getLogger("fcoin.mcp.sse")
 
 try:
@@ -183,6 +185,22 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
             )
         return Response()
 
+    async def handle_market_stream(request: Request) -> Response:
+        """GET /stream — SSE stream of live ticker, orderbook, and trade events."""
+        event_filter = request.query_params.get("events")  # e.g. "ticker,trade"
+
+        async def sse_put(data: bytes) -> None:
+            await request._send({"type": "http.response.body", "body": data})
+
+        sub = await market_stream.subscribe(sse_put, event_filter=event_filter)
+        try:
+            await market_stream.push_to(sub, sse_put)
+        except Exception:
+            pass
+        finally:
+            await market_stream.unsubscribe(sub)
+        return Response()
+
     async def _trade_handler(request: Request) -> JSONResponse:
         return await _trade(request, server)
 
@@ -195,6 +213,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/prompt", _prompt, methods=["GET"])
     app.add_route("/trade", _trade_handler, methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
+    app.add_route("/stream", handle_market_stream, methods=["GET"])
     app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])
     app.mount("/messages/", app=sse_transport.handle_post_message)
 

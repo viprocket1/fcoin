@@ -841,6 +841,7 @@ class ExchangeManager:
                 fee_rate=self._taker_fee,
             )
             wallet.sync_to_store(self._store)
+            self._broadcast_trade(result)
             return result
         else:
             result = wallet.place_order(
@@ -914,9 +915,28 @@ class ExchangeManager:
         new_book.simulate_from_spread(price)
         with self._book_lock:
             self._book = new_book
+        # Broadcast market data to SSE clients (non-blocking)
+        try:
+            from src.stream import market_stream
+            mid = (self._book.bids[0].price + self._book.asks[0].price) / 2
+            market_stream.broadcast({"type": "ticker",    "data": self.get_ticker()})
+            market_stream.broadcast({"type": "orderbook", "data": self._book.to_dict()})
+        except Exception:
+            pass
 
+    # ------------------------------------------------------------------
+    # SSE broadcast helpers (non-blocking)
+    # ------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
+    def _broadcast_trade(self, result: dict) -> None:
+        """Broadcast a filled trade to SSE clients."""
+        try:
+            from src.stream import market_stream
+            market_stream.broadcast({"type": "trade", "data": result})
+        except Exception:
+            pass
+
+    # --------------------------------------------------------------------------
 # Backwards compatibility — single-exchange singleton
 # ---------------------------------------------------------------------------
 
