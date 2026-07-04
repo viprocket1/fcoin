@@ -2,10 +2,10 @@
 SSE/HTTP transport for MCP — connect non-local clients over HTTP.
 
 Run the agent as:
-    python -m fcoin.agent --transport sse --port 8080
+    python -m src --transport sse --port 8080
 
 Client connects via HTTP POST /messages and receives events via SSE /events.
-Install with: pip install fcoin-mcp-agent[sse]
+Requires: mcp (included in core dependencies)
 """
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ if TYPE_CHECKING:
 log = logging.getLogger("fcoin.mcp.sse")
 
 try:
-    from sse_starlette import SseServerTransport
+    from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.routing import Route, Mount
     from starlette.requests import Request
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, Response
     import uvicorn
 except ImportError:
     SseServerTransport = None
@@ -31,37 +31,36 @@ except ImportError:
     uvicorn = None
 
 
-async def _handle_post(request: Request, server: "MCPServer") -> JSONResponse:
-    """Handle POST /messages — JSON-RPC commands from the client."""
-    body = await request.json()
-    log.debug("Received: %s", body)
-    # Let the MCP server process the JSON-RPC request
-    # (stdio_server is replaced by the HTTP streams in SSE mode)
-    return JSONResponse({"jsonrpc": "2.0", "id": body.get("id"), "result": {}})
+async def _health(request: Request) -> JSONResponse:
+    """GET /health — DigitalOcean App Platform / Render health check."""
+    return JSONResponse({"status": "ok"})
 
 
 async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) -> None:
     if SseServerTransport is None:
         raise ImportError(
-            "SSE transport not installed. Run: pip install fcoin-mcp-agent[sse]"
+            "MCP SSE transport not available. "
+            "Ensure 'mcp' is installed: pip install fcoin-mcp-agent"
         )
 
-    mcp = server._server
-    transport = SseServerTransport("/messages")
+    mcp_server = server._server
+    sse_transport = SseServerTransport("/messages/")
 
-    async def handle_sse(scope, receive, send):
-        await transport.handle_websocket(scope, receive, send)
-
-    async def _health(request: Request) -> JSONResponse:
-        """GET /health — DigitalOcean App Platform health check."""
-        return JSONResponse({"status": "ok"})
-
+    async def handle_sse(request: Request) -> Response:
+        """GET /events — SSE connection from the MCP client."""
+        async with sse_transport.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await mcp_server.run(
+                streams[0], streams[1], mcp_server.create_initialization_options()
+            )
+        return Response()
 
     app = Starlette(
         routing=[
             Route("/health", _health, methods=["GET"]),
-            Route("/messages", _handle_post, methods=["POST"]),
-            Mount("/events", Route(handle_sse)),
+            Route("/events", handle_sse, methods=["GET"]),
+            Mount("/messages/", app=sse_transport.handle_post_message),
         ]
     )
 
