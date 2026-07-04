@@ -165,6 +165,66 @@ async def _trade(request: Request, server: "MCPServer") -> JSONResponse:
         return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
 
 
+async def _create_coin(request: Request) -> JSONResponse:
+    """
+    POST /create_coin — Create a new agent-issued coin.
+    Header: X-Agent-ID: <owner-agent-id>
+    Body: {"symbol": "ALICE", "name": "Alice Coin", "total_supply": 10000, "price": 2.5}
+    """
+    try:
+        agent_id = request.headers.get("X-Agent-ID", "default")
+        body = await request.json()
+        symbol       = body.get("symbol", "")
+        name         = body.get("name", symbol)
+        total_supply = float(body.get("total_supply", 0))
+        decimals     = int(body.get("decimals", 18))
+        price        = float(body.get("price", 1.0))
+
+        if not symbol:
+            return JSONResponse({"error": "symbol is required"}, status_code=400)
+        ex = get_exchange()
+        result = ex.create_coin(
+            owner=agent_id,
+            symbol=symbol,
+            name=name,
+            total_supply=total_supply,
+            decimals=decimals,
+            price=price,
+        )
+        return JSONResponse({"agent_id": agent_id, **result})
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _trade_coin(request: Request) -> JSONResponse:
+    """
+    POST /trade_coin — Trade an agent-issued coin.
+    Header: X-Agent-ID: <agent-id>
+    Body: {"action": "buy"|"sell", "symbol": "ALICE", "quantity": 100}
+    """
+    try:
+        agent_id = request.headers.get("X-Agent-ID", "default")
+        body = await request.json()
+        action   = body.get("action", "").lower()
+        symbol   = body.get("symbol", "")
+        quantity = float(body.get("quantity", 0))
+
+        if action not in ("buy", "sell"):
+            return JSONResponse({"error": "action must be 'buy' or 'sell'"}, status_code=400)
+        if not symbol:
+            return JSONResponse({"error": "symbol is required"}, status_code=400)
+        if quantity <= 0:
+            return JSONResponse({"error": "quantity must be > 0"}, status_code=400)
+
+        ex = get_exchange()
+        result = ex.trade_coin(agent_id=agent_id, action=action, symbol=symbol, quantity=quantity)
+        return JSONResponse({"agent_id": agent_id, **result})
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
 async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) -> None:
     if SseServerTransport is None:
         raise ImportError(
@@ -212,6 +272,8 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/agents", _agents, methods=["GET"])
     app.add_route("/prompt", _prompt, methods=["GET"])
     app.add_route("/trade", _trade_handler, methods=["POST"])
+    app.add_route("/create_coin", _create_coin, methods=["POST"])
+    app.add_route("/trade_coin", _trade_coin, methods=["POST"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.add_route("/stream", handle_market_stream, methods=["GET"])
     app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])

@@ -55,7 +55,20 @@ class Trade:
     side:       Side
     price:      float
     quantity:   float
+    asset:      str = "fcoin"   # "fcoin" or a coin symbol like "COINALICE"
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+
+@dataclass(slots=True)
+class Coin:
+    """An ERC-20-like token created by an agent."""
+    id:            str   # unique id e.g. "COIN_alice_01"
+    symbol:        str   # e.g. "COINALICE"
+    name:          str   # e.g. "Alice Coin"
+    total_supply:  float
+    decimals:      int   # token decimal places
+    owner:         str   # agent_id who created it
+    price:         float # initial price in USDC per token
 
 
 @dataclass(slots=True)
@@ -189,7 +202,6 @@ class AgentWallet:
     __slots__ = (
         "agent_id", "_balances", "_orders", "_trades",
         "_order_cnt", "_key", "_lock",
-        "_available_usdc", "_available_fcoin",
     )
 
     DEFAULT_INITIAL_USDC  = 10_000.0
@@ -208,33 +220,12 @@ class AgentWallet:
         self._order_cnt  = 0
         # Per-agent lock — only serialises ops within THIS agent
         self._lock       = threading.RLock()
-        # Inline balances to avoid per-agent dict overhead
-        self._available_usdc  = initial_usdc
-        self._available_fcoin = initial_fcoin
         self._balances: dict[str, Balance] = {
             "usdc":  Balance(available=initial_usdc),
             "fcoin": Balance(available=initial_fcoin),
         }
         # Ethereum-style wallet
         self._key = self._generate_key(priv_key)
-
-    @property
-    def available_usdc(self) -> float:
-        return self._available_usdc
-
-    @available_usdc.setter
-    def available_usdc(self, value: float) -> None:
-        self._available_usdc = value
-        self._balances["usdc"].available = value
-
-    @property
-    def available_fcoin(self) -> float:
-        return self._available_fcoin
-
-    @available_fcoin.setter
-    def available_fcoin(self, value: float) -> None:
-        self._available_fcoin = value
-        self._balances["fcoin"].available = value
 
     # ---------------------------------------------------------------------------
     # Ethereum wallet
@@ -453,24 +444,25 @@ class AgentWallet:
     def _execute_order(self, order: Order, exec_price: float, fee_rate: float) -> None:
         cost = exec_price * order.quantity
         fee  = cost * fee_rate
+        b_usdc  = self._balances.get("usdc")
+        b_fcoin = self._balances.get("fcoin")
 
         if order.side == Side.BUY:
             total = cost + fee
-            if self._available_usdc < total:
+            if b_usdc is None or b_usdc.available < total:
                 order.status = "rejected"
                 return
-            self._available_usdc  -= total
-            self._available_fcoin += order.quantity
-            self._balances["usdc"].available  = self._available_usdc
-            self._balances["fcoin"].available = self._available_fcoin
+            b_usdc.available  -= total
+            if b_fcoin is None:
+                b_fcoin = Balance(available=0.0)
+                self._balances["fcoin"] = b_fcoin
+            b_fcoin.available += order.quantity
         else:
-            if self._available_fcoin < order.quantity:
+            if b_fcoin is None or b_fcoin.available < order.quantity:
                 order.status = "rejected"
                 return
-            self._available_fcoin -= order.quantity
-            self._available_usdc  += cost - fee
-            self._balances["fcoin"].available = self._available_fcoin
-            self._balances["usdc"].available  = self._available_usdc
+            b_fcoin.available -= order.quantity
+            b_usdc.available  += cost - fee
 
         order.filled  = order.quantity
         order.status  = "filled"
@@ -491,8 +483,10 @@ class AgentWallet:
 
     def sync_to_store(self, store: RedisWalletStore) -> None:
         """Persist current balances, orders, and trades to the store."""
-        store.set_available_usdc(self.agent_id, self._available_usdc)
-        store.set_available_fcoin(self.agent_id, self._available_fcoin)
+        usdc_bal = self._balances.get("usdc")
+        fcoin_bal = self._balances.get("fcoin")
+        store.set_available_usdc(self.agent_id, usdc_bal.available if usdc_bal else 0.0)
+        store.set_available_fcoin(self.agent_id, fcoin_bal.available if fcoin_bal else 0.0)
         orders = [
             {
                 "id":           o.id,
@@ -705,6 +699,7 @@ class ExchangeManager:
         "_price_feed", "_wallets", "_book",
         "_maker_fee", "_taker_fee", "_refresh_interval",
         "_book_lock", "_running", "_thread", "_store",
+        "_coins", "_coin_registry",
     )
 
     def __init__(
@@ -731,6 +726,8 @@ class ExchangeManager:
         self._running              = False
         self._thread: threading.Thread | None = None
         self._store                = RedisWalletStore(redis_url)
+        self._coins: dict[str, Coin]               = {}
+        self._coin_registry: dict[str, str]        = {}
         self._refresh_book()
         log.info("ExchangeManager initialised  price=%.4f  redis=%s",
                  initial_price, "yes" if redis_url else "no (in-process)")
@@ -767,12 +764,12 @@ class ExchangeManager:
         # Check persisted store (cold start after restart)
         if self._store.exists(agent_id):
             wallet = AgentWallet(agent_id=agent_id)
-            wallet._available_usdc  = self._store.get_available_usdc(agent_id)
-            wallet._available_fcoin = self._store.get_available_fcoin(agent_id)
+            stored_usdc  = self._store.get_available_usdc(agent_id)
+            stored_fcoin = self._store.get_available_fcoin(agent_id)
             wallet._order_cnt = self._store.get_order_cnt(agent_id)
-            # Re-hydrate balances dict so get_balance() works
-            wallet._balances["usdc"].available  = wallet._available_usdc
-            wallet._balances["fcoin"].available = wallet._available_fcoin
+            # Re-hydrate balances dict
+            wallet._balances["usdc"].available  = stored_usdc
+            wallet._balances["fcoin"].available = stored_fcoin
             self._wallets[agent_id] = wallet
             log.info("Agent loaded from store  id=%s", agent_id)
             return wallet
@@ -858,11 +855,16 @@ class ExchangeManager:
         """Get an agent's portfolio (auto-creates wallet if needed)."""
         wallet = self.get_or_create_agent(agent_id)
         price  = self._price_feed.get_price()
+        # Include all asset balances (usdc, fcoin, and any agent-issued coins)
+        assets = {}
+        for asset, bal in wallet._balances.items():
+            assets[asset] = {"available": bal.available, "locked": bal.locked, "total": bal.total}
         return {
             "agent_id": agent_id,
             "address":  wallet.address,
-            "usdc":     wallet.get_balance("usdc"),
-            "fcoin":    wallet.get_balance("fcoin"),
+            "usdc":     assets.pop("usdc", {"available": 0.0, "locked": 0.0, "total": 0.0}),
+            "fcoin":    assets.pop("fcoin", {"available": 0.0, "locked": 0.0, "total": 0.0}),
+            "coins":    assets,
             "position": wallet.get_position(price),
             "orders":   wallet.get_orders(),
             "trades":   wallet.get_trades(),
@@ -881,6 +883,167 @@ class ExchangeManager:
         self._price_feed.set_price(price)
         self._refresh_book()
         return {"price": price}
+
+    # ---------------------------------------------------------------------------
+    # Agent-issued coins (ERC-20-like)
+    # ---------------------------------------------------------------------------
+
+    def create_coin(
+        self,
+        owner:        str,
+        symbol:       str,
+        name:         str,
+        total_supply: float,
+        decimals:     int = 18,
+        price:        float = 1.0,
+    ) -> dict[str, Any]:
+        """
+        Create a new agent-issued coin.
+        The entire supply is minted to the owner's balance.
+        Symbol is uppercased and stored uppercase.
+        """
+        if total_supply <= 0:
+            raise ValueError("total_supply must be positive")
+        if decimals < 0 or decimals > 18:
+            raise ValueError("decimals must be between 0 and 18")
+        symbol_upper = symbol.upper()
+        if symbol_upper in ("USDC", "FCOIN"):
+            raise ValueError(f"Cannot use reserved symbol {symbol_upper}")
+        if symbol_upper in self._coin_registry:
+            raise ValueError(f"Symbol {symbol_upper} already exists")
+
+        coin_id = f"COIN_{owner}_{len([c for c in self._coins.values() if c.owner == owner]) + 1:02d}"
+        coin = Coin(
+            id=symbol_upper,
+            symbol=symbol_upper,
+            name=name,
+            total_supply=total_supply,
+            decimals=decimals,
+            owner=owner,
+            price=price,
+        )
+        self._coins[coin_id] = coin
+        self._coin_registry[symbol_upper] = coin_id
+
+        # Mint full supply to owner's balance
+        owner_wallet = self.get_or_create_agent(owner)
+        bal = owner_wallet._balances.get(symbol_upper)
+        if bal is None:
+            bal = Balance()
+            owner_wallet._balances[symbol_upper] = bal
+        bal.available += total_supply
+
+        return {
+            "coin_id":       coin_id,
+            "symbol":        symbol_upper,
+            "name":          name,
+            "total_supply":  total_supply,
+            "decimals":      decimals,
+            "owner":         owner,
+            "price":         price,
+            "circulating":   total_supply,
+        }
+
+    def list_coins(self) -> list[dict[str, Any]]:
+        """List all agent-issued coins."""
+        return [
+            {
+                "symbol":       c.symbol,
+                "name":         c.name,
+                "total_supply": c.total_supply,
+                "decimals":     c.decimals,
+                "owner":        c.owner,
+                "price":        c.price,
+            }
+            for c in self._coins.values()
+        ]
+
+    def get_coin_price(self, symbol: str) -> float | None:
+        """Get the USDC price of an agent coin."""
+        coin_id = self._coin_registry.get(symbol.upper())
+        if coin_id is None:
+            return None
+        return self._coins[coin_id].price
+
+    def trade_coin(
+        self,
+        agent_id: str,
+        action:   str,
+        symbol:   str,
+        quantity: float,
+    ) -> dict[str, Any]:
+        """
+        Execute a market order for an agent-issued coin.
+        The counterparty is the coin owner (book is P2P, price is fixed at coin.price).
+        """
+        symbol_upper = symbol.upper()
+        coin_id = self._coin_registry.get(symbol_upper)
+        if coin_id is None:
+            raise ValueError(f"Unknown symbol: {symbol_upper}")
+        coin = self._coins[coin_id]
+
+        if action not in ("buy", "sell"):
+            raise ValueError("action must be 'buy' or 'sell'")
+        if quantity <= 0:
+            raise ValueError("quantity must be positive")
+
+        buyer  = self.get_or_create_agent(agent_id)
+        seller = self.get_or_create_agent(coin.owner)
+
+        cost = quantity * coin.price
+        fee  = cost * self._taker_fee
+
+        with buyer._lock:
+            if action == "buy":
+                # Deduct USDC from buyer
+                b_usdc = buyer._balances.get("usdc")
+                if b_usdc is None or b_usdc.available < cost + fee:
+                    return {"status": "rejected", "reason": "insufficient_usdc"}
+                b_usdc.available -= (cost + fee)
+                # Add coin tokens to buyer
+                b_token = buyer._balances.get(symbol_upper)
+                if b_token is None:
+                    b_token = Balance()
+                    buyer._balances[symbol_upper] = b_token
+                b_token.available += quantity
+            else:
+                # Deduct coin tokens from seller (seller is always the owner)
+                s_token = seller._balances.get(symbol_upper)
+                if s_token is None or s_token.available < quantity:
+                    return {"status": "rejected", "reason": f"insufficient_{symbol_upper}"}
+                s_token.available -= quantity
+                # Add USDC to seller
+                seller._balances["usdc"].available += (cost - fee)
+
+        # Record the trade
+        trade_id = f"tr_{len(buyer._trades) + 1:06d}"
+        trade = Trade(
+            id=trade_id,
+            agent_id=agent_id,
+            order_id=f"{agent_id[:8]}_coin_{len(buyer._trades):04d}",
+            side=Side(action),
+            price=coin.price,
+            quantity=quantity,
+            asset=symbol_upper,
+        )
+        buyer._trades.append(trade)
+
+        # Sync both wallets
+        buyer.sync_to_store(self._store)
+        seller.sync_to_store(self._store)
+
+        return {
+            "status":    "filled",
+            "trade_id":  trade_id,
+            "agent_id":  agent_id,
+            "symbol":    symbol_upper,
+            "side":      action,
+            "price":     coin.price,
+            "quantity":  quantity,
+            "cost":      cost,
+            "fee":       fee,
+            "owner":     coin.owner,
+        }
 
     # ---------------------------------------------------------------------------
     # Background book refresh (optional — can be disabled with interval=0)
