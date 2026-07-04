@@ -56,13 +56,10 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
             )
         return Response()
 
-    app = Starlette(
-        routing=[
-            Route("/health", _health, methods=["GET"]),
-            Route("/events", handle_sse, methods=["GET"]),
-            Mount("/messages/", app=sse_transport.handle_post_message),
-        ]
-    )
+    app = Starlette()
+    app.add_route("/health", _health, methods=["GET"])
+    app.add_route("/events", handle_sse, methods=["GET"])
+    app.mount("/messages/", app=sse_transport.handle_post_message)
 
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server_uvicorn = uvicorn.Server(config)
