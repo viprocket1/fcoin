@@ -83,7 +83,10 @@ class Session:
         """Process one user message and return the final text response."""
         self.add_turn("user", user_message)
 
-        for _ in range(self.max_turns):
+        limit = self.max_turns if self.max_turns > 0 else float("inf")
+        turns = 0
+        while turns < limit:
+            turns += 1
             messages = self._build_messages()
             tools = list(self.tool_registry.values())
 

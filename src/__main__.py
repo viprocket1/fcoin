@@ -10,6 +10,7 @@ import os
 import sys
 
 from . import init_exchange, Session, TOOLS
+from .auto_trader import AutoTrader
 from .server import MCPServer
 
 
@@ -39,6 +40,18 @@ def _parse_args() -> argparse.Namespace:
         "--redis-url", type=str, default=os.environ.get("REDIS_URL"),
         help="Redis connection URL (or set REDIS_URL env var)",
     )
+    parser.add_argument(
+        "--auto-trade", action="store_true",
+        help="Spawn N autonomous trading agents on startup",
+    )
+    parser.add_argument(
+        "--num-agents", type=int, default=5,
+        help="Number of auto-trading agents (default: 5)",
+    )
+    parser.add_argument(
+        "--trade-interval", type=float, default=15.0,
+        help="Seconds between auto-trades per agent (default: 15)",
+    )
     return parser.parse_args()
 
 
@@ -61,8 +74,17 @@ def main() -> None:
             "Use cancel_order to cancel open orders. "
             "Think carefully about risk before placing orders."
         ),
-        max_turns=20,
+        max_turns=20,   # auto-trade handles continuous background trading
     )
+
+    auto_trader = None
+    if args.auto_trade:
+        auto_trader = AutoTrader(
+            ex,
+            n_agents=args.num_agents,
+            interval=args.trade_interval,
+        )
+        auto_trader.start()
 
     for tool in TOOLS:
         session.register_tool(tool)
