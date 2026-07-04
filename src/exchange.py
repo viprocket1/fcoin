@@ -334,7 +334,19 @@ class AgentWallet:
         )
 
         if order_type == "market":
-            self._execute_order(order, book, mid_price, fee_rate)
+            # Snapshot best bid/ask under manager lock so background refresh can't
+            # mutate the book mid-execution (race caused price=0 -> rejected)
+            with self._book_lock:
+                if side == "buy":
+                    exec_price = self._book.best_ask() or price
+                else:
+                    exec_price = self._book.best_bid() or price
+            return wallet.execute_market_order(
+                side=side,
+                quantity=quantity,
+                exec_price=exec_price,
+                fee_rate=self._taker_fee,
+            )
         else:
             self._lock_limit_order(order, fee_rate)
             self._orders[order_id] = order
@@ -365,6 +377,37 @@ class AgentWallet:
         order.status = "cancelled"
         return {"order_id": order_id, "status": "cancelled"}
 
+    def execute_market_order(
+        self,
+        side:     str,
+        quantity: float,
+        exec_price: float,
+        fee_rate: float = 0.001,
+    ) -> dict[str, Any]:
+        """Execute a market order at a price already locked by the manager."""
+        self._order_cnt += 1
+        order_id = f"{self.agent_id[:8]}_{self._order_cnt:04d}"
+        order = Order(
+            id=order_id,
+            agent_id=self.agent_id,
+            side=Side(side),
+            order_type=OrderType.MARKET,
+            price=None,
+            quantity=quantity,
+        )
+        self._execute_order(order, exec_price, fee_rate)
+        return {
+            "order_id":   order.id,
+            "agent_id":   self.agent_id,
+            "side":       order.side.value,
+            "type":       order.order_type.value,
+            "price":      order.price,
+            "quantity":   order.quantity,
+            "filled":     order.filled,
+            "status":     order.status,
+            "created_at": order.created_at,
+        }
+
     # ---------------------------------------------------------------------------
     # Internal
     # ---------------------------------------------------------------------------
@@ -387,15 +430,9 @@ class AgentWallet:
     def _execute_order(
         self,
         order:    Order,
-        book:     OrderBook | None,
-        mid_price: float,
+        exec_price: float,
         fee_rate: float,
     ) -> None:
-        if order.side == Side.BUY:
-            exec_price = (book.best_ask() if book else None) or mid_price
-        else:
-            exec_price = (book.best_bid() if book else None) or mid_price
-
         cost = exec_price * order.quantity
         fee  = cost * fee_rate
 
@@ -540,15 +577,29 @@ class ExchangeManager:
         """Place a trade for a specific agent (auto-creates wallet if needed)."""
         wallet = self.get_or_create_agent(agent_id)
         order_type = "limit" if price is not None else "market"
-        return wallet.place_order(
-            side=action,
-            quantity=quantity,
-            price=price,
-            order_type=order_type,
-            fee_rate=self._taker_fee,
-            book=self._book if order_type == "market" else None,
-            mid_price=self._price_feed.get_price(),
-        )
+
+        if order_type == "market":
+            # Snapshot best bid/ask under manager lock so background refresh can't
+            # mutate the book mid-execution (race caused price=0 -> rejected)
+            with self._book_lock:
+                if action == "buy":
+                    exec_price = self._book.best_ask() or self._price_feed.get_price()
+                else:
+                    exec_price = self._book.best_bid() or self._price_feed.get_price()
+            return wallet.execute_market_order(
+                side=action,
+                quantity=quantity,
+                exec_price=exec_price,
+                fee_rate=self._taker_fee,
+            )
+        else:
+            return wallet.place_order(
+                side=action,
+                quantity=quantity,
+                price=price,
+                order_type=order_type,
+                fee_rate=self._taker_fee,
+            )
 
     def get_portfolio(self, agent_id: str) -> dict[str, Any]:
         """Get an agent's portfolio (auto-creates wallet if needed)."""
