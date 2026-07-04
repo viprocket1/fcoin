@@ -52,9 +52,15 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     async def handle_sse(scope, receive, send):
         await transport.handle_websocket(scope, receive, send)
 
+    async def _health(request: Request) -> JSONResponse:
+        """GET /health — DigitalOcean App Platform health check."""
+        return JSONResponse({"status": "ok"})
+
+
     app = Starlette(
         routing=[
-            Route("/messages", lambda r: _handle_post(r, server), methods=["POST"]),
+            Route("/health", _health, methods=["GET"]),
+            Route("/messages", _handle_post, methods=["POST"]),
             Mount("/events", Route(handle_sse)),
         ]
     )

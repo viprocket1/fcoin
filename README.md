@@ -1,29 +1,36 @@
 # fcoin — Synthetic Asset Trading MCP Agent
 
-Universal MCP agent scaffold for trading a synthetic asset (fcoin) on a simulated exchange. Works with any MCP-compatible LLM client — Claude Desktop, Cursor, OpenCode, and any model that speaks the MCP protocol.
+Universal MCP agent scaffold for trading a synthetic asset (fcoin) on a simulated
+exchange. Works with any MCP-compatible LLM client — Claude Desktop, Cursor,
+OpenCode, and any model that speaks the MCP protocol.
 
-## Quick Start
+---
 
-```bash
-# stdio — for Claude Desktop, Cursor, any MCP client
-python -m src
+## One-Click Deploy to DigitalOcean
 
-# SSE — for remote agents over HTTP
-python -m src --transport sse --port 8080 --initial-price 100.0
-```
+[![Deploy to DO](https://www.deploydo.com/custom-button/images/do-btn-deploy.svg)](https://cloud.digitalocean.com/apps/new?repo=https://github.com/viprocket1/fcoin/tree/main)
+
+Or manually: select **App Platform → GitHub → your `fcoin` repo → specify `python` as the
+run command and `pip install -e .` as the build command.
+
+> **HTTPS is enabled automatically** on App Platform — no nginx or certbot needed.
+
+---
 
 ## Architecture
 
 ```
 src/
-├── agent.py           # Session, ToolDef, LLMProvider (model-agnostic core)
-├── server.py           # MCPServer — stdio + SSE, protocol-compliant
-├── exchange.py         # Exchange, PriceFeed — mock orderbook + GBM price
-├── providers/          # Anthropic, OpenAI, Ollama (plug-and-play)
+├── agent.py              # Session, ToolDef, LLMProvider (model-agnostic core)
+├── server.py             # MCPServer — stdio + SSE, protocol-compliant
+├── exchange.py           # Exchange, PriceFeed — mock orderbook + GBM price
+├── providers/            # Anthropic, OpenAI, Ollama (plug-and-play)
 ├── tools/
-│   └── trading.py      # 12 MCP trading tools
-└── transport/sse.py    # HTTP/SSE for remote clients
+│   └── trading.py        # 12 MCP trading tools
+└── transport/sse.py      # HTTP/SSE for remote clients
 ```
+
+---
 
 ## MCP Tools (12 total)
 
@@ -40,10 +47,33 @@ src/
 | `cancel_order` | Cancel an open order |
 | `set_price` | Admin: override simulation price |
 
+---
+
+## Quick Start (local)
+
+```bash
+# stdio — for Claude Desktop, Cursor, any MCP client
+python -m src
+
+# SSE — for remote agents over HTTP
+python -m src --transport sse --port 8080 --initial-price 100.0
+```
+
+---
+
 ## Connecting an LLM Agent
 
-Point your MCP client at the agent via stdio or SSE. Example config for Claude Desktop:
+### DigitalOcean App Platform (deployed)
+```json
+"mcpServers": {
+  "fcoin": {
+    "url": "https://fcoin-agent-<your-app-name>.ondigitalocean.app/events",
+    "transport": "sse"
+  }
+}
+```
 
+### Local / stdio (Claude Desktop)
 ```json
 "mcpServers": {
   "fcoin": {
@@ -52,6 +82,8 @@ Point your MCP client at the agent via stdio or SSE. Example config for Claude D
   }
 }
 ```
+
+---
 
 ## Customising the Exchange
 
@@ -63,7 +95,7 @@ ex = init_exchange(
     initial_usdc=50_000,
     initial_fcoin=0,
     initial_price=100.0,
-    volatility=0.001,   # GBM sigma per tick
+    volatility=0.001,
 )
 
 session = Session(system_prompt="You are a fcoin trader.")
@@ -71,6 +103,33 @@ for tool in TOOLS:
     session.register_tool(tool)
 session.llm_provider = OllamaProvider(model="llama3")
 ```
+
+---
+
+## Docker (manual droplet)
+
+```bash
+docker build -t fcoin-agent .
+docker run -d -p 8080:8080 --restart unless-stopped fcoin-agent
+```
+
+---
+
+## Securing `set_price`
+
+Before production, remove or guard the admin tool:
+
+```python
+ADMIN_TOKEN = "your-secret-token"
+
+def set_price(price: float, token: str = "") -> dict:
+    if token != ADMIN_TOKEN:
+        return {"error": "unauthorized"}
+    _price_feed.set_price(price)
+    return {"price": price}
+```
+
+---
 
 ## License
 
