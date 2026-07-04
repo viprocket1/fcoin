@@ -111,30 +111,132 @@ $runePath = Join-Path $BinDir 'rune.cmd'
 
 # Routing: any subcommand (`update`, `uninstall`, `version`, `status`) goes
 # through the installer itself; everything else is forwarded to agent_runner.py.
-$InstallerUrl = "https://raw.githubusercontent.com/$Repo/$Branch/installers/install.ps1"
+$RepoUrl     = "https://raw.githubusercontent.com/$Repo/$Branch"
+$InstallerUrl = "$RepoUrl/installers/install.ps1"
+$RunnerUrl    = "$RepoUrl/agent_runner.py"
+
+# Auto-update: in PowerShell, we use a small PowerShell shim `rune-update.ps1`
+# alongside rune.cmd. The cmd calls into it for subcommands only, and on every
+# run, calls `_maybe_update` before forwarding args.
+
+$updateScript = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$runner = '$RunnerUrl'
+`$dest   = Join-Path '$InstallDir' 'agent_runner.py'
+`$bak    = "`$dest.bak.`$((Get-Date -UFormat %s))"
+`$new    = "`$dest.new"
+`$interval = [int](`$env:RUNE_UPDATE_INTERVAL_SECS)
+if (`$interval -le 0) { `$interval = 21600 }
+
+function Test-Stale(`$p, `$secs) {
+    if (-not (Test-Path `$p)) { return `$true }
+    `$mt = (Get-ItemItem `$p 2>`$null).LastWriteTimeUtc
+    if (-not `$mt) { return `$false }
+    `$age = ((Get-Date).ToUniversalTime() - `$mt).TotalSeconds
+    return (`$age -gt `$secs)
+}
+
+if (-not `$env:RUNE_OFFLINE -and -not `$env:RUNE_NO_AUTO_UPDATE) {
+    if ((Test-Stale `$dest `$interval) -or `$env:RUNE_FORCE_UPDATE) {
+        Write-Host "[rune] checking for updates ..."
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri `$runner -OutFile `$new -TimeoutSec 30
+            if ((Test-Path `$new) -and ((Get-Item `$new).Length -gt 0)) {
+                `$cur = if (Test-Path `$dest) { (Get-Content `$dest -Raw) } else { "" }
+                `$incoming = Get-Content `$new -Raw
+                if (`$cur -ne `$incoming) {
+                    if (Test-Path `$dest) { Move-Item `$dest `$bak -Force }
+                    Move-Item `$new `$dest -Force
+                    Write-Host "[rune] updated agent_runner.py (backup: `$bak)"
+                } else {
+                    Remove-Item `$new -Force
+                    if (`$env:RUNE_FORCE_UPDATE) { Write-Host "[rune] already up-to-date" }
+                }
+            }
+        } catch {
+            if (Test-Path `$new) { Remove-Item `$new -Force }
+            if (`$env:RUNE_FORCE_UPDATE) { Write-Host "[rune] upstream unreachable (kept local copy)" }
+        }
+    }
+}
+"@
+
+# Inline powershell block — Windows .cmd can't call back into PS easily.
+# Embed the same logic in a `PowerShell -Command` line.
+$maybeUpdateCmd = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference=\'SilentlyContinue\';$d=Join-Path \'' + $InstallDir + '\' \'agent_runner.py\';$b=\'$d\'.Replace(\'?','a');$n=$d+\'.new\';$i=[int]($env:RUNE_UPDATE_INTERVAL_SECS);if($i -le 0){$i=21600};if(!(Test-Path $d) -or $env:RUNE_FORCE_UPDATE -or (([math]::Round((New-TimeSpan -Start (Get-ItemItem $d).LastWriteTimeUtc -End (Get-Date).ToUniversalTime()).TotalSeconds)) -gt $i)){try{$Env:RUNE_OFFLINE=$null;$Env:RUNE_NO_AUTO_UPDATE=$null;if((-not $Env:RUNE_OFFLINE) -and (-not $Env:RUNE_NO_AUTO_UPDATE)){Invoke-WebRequest -UseBasicParsing -Uri \'' + $RunnerUrl + '\' -OutFile $n -TimeoutSec 30;if(Test-Path $n){if((Get-Content $d -Raw) -ne (Get-Content $n -Raw)){$ts=(Get-Date -UFormat %s);Move-Item -Force $d \"$d.bak.$ts\";Move-Item -Force $n $d;Write-Host \"[rune] updated agent_runner.py (backup: $d.bak.$ts)\"}else{Remove-Item -Force $n}}}}catch{if(Test-Path $n){Remove-Item -Force $n}}}"'
+
+# The single-line PS gets messy; instead, write a sibling .ps1 helper.
+$updaterPath = Join-Path $BinDir 'rune-update.ps1'
+$updatePs = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+`$runner = '$RunnerUrl'
+`$dest   = Join-Path '$InstallDir' 'agent_runner.py'
+`$bak    = "`$dest.bak.`$((Get-Date -UFormat %s))"
+`$new    = "`$dest.new"
+`$interval = if (`$env:RUNE_UPDATE_INTERVAL_SECS) { [int]`$env:RUNE_UPDATE_INTERVAL_SECS } else { 21600 }
+if (`$env:RUNE_OFFLINE -or `$env:RUNE_NO_AUTO_UPDATE) { exit 0 }
+if (`$env:RUNE_FORCE_UPDATE) { }  # fall through to fetch
+else {
+    if (Test-Path `$dest) {
+        `$mt  = (Get-Item `$dest).LastWriteTimeUtc
+        `$age = ((Get-Date).ToUniversalTime() - `$mt).TotalSeconds
+        if (`$age -lt `$interval) { exit 0 }
+    }
+}
+`$ok = `$false
+try { Invoke-WebRequest -UseBasicParsing -Uri `$runner -OutFile `$new -TimeoutSec 30 ; `$ok = `$true } catch { }
+if (-not `$ok) {
+    if (Test-Path `$new) { Remove-Item `$new -Force }
+    if (`$env:RUNE_FORCE_UPDATE) { Write-Host '[rune] upstream unreachable (kept local copy)' }
+    exit 0
+}
+`$cur = if (Test-Path `$dest) { Get-Content `$dest -Raw } else { '' }
+`$inc = Get-Content `$new -Raw
+if (`$cur -eq `$inc) {
+    Remove-Item `$new -Force
+    if (`$env:RUNE_FORCE_UPDATE) { Write-Host '[rune] already up-to-date' }
+    exit 0
+}
+if (Test-Path `$dest) { Move-Item `$dest `$bak -Force }
+Move-Item `$new `$dest -Force
+Write-Host "[rune] updated agent_runner.py (backup: `$bak)"
+"@
+$updatePs | Set-Content -Path $updaterPath -Encoding ASCII
 
 @"
 @echo off
 rem fcoin agent launcher + self-updater — generated by install.ps1
 setlocal
 set "INSTALLER_URL=$InstallerUrl"
+set "RUNNER_URL=$RunnerUrl"
 set "INSTALL_DIR=$InstallDir"
 set "PYBIN=$PyBin"
+set "UPDATER=%BIN_DIR_PLACEHOLDER%\rune-update.ps1"
 if "%1"=="" goto :help
-if /I "%1"=="update"      goto :rune_update
-if /I "%1"=="uninstall"   goto :rune_uninstall
-if /I "%1"=="version"     goto :rune_version
-if /I "%1"=="status"      goto :rune_status
-if /I "%1"=="--update"    goto :rune_update
-if /I "%1"=="--uninstall" goto :rune_uninstall
-if /I "%1"=="--version"   goto :rune_version
-if /I "%1"=="--help"      goto :help
-if /I "%1"=="-h"          goto :help
+if /I "%1"=="update"        goto :rune_update
+if /I "%1"=="force-update"  goto :rune_force_update
+if /I "%1"=="uninstall"     goto :rune_uninstall
+if /I "%1"=="version"       goto :rune_version
+if /I "%1"=="status"        goto :rune_status
+if /I "%1"=="--update"      goto :rune_update
+if /I "%1"=="--force-update" goto :rune_force_update
+if /I "%1"=="--uninstall"   goto :rune_uninstall
+if /I "%1"=="--version"     goto :rune_version
+if /I "%1"=="--status"      goto :rune_status
+if /I "%1"=="--help"        goto :help
+if /I "%1"=="-h"            goto :help
 goto :run_agent
 
 :rune_update
 echo [rune] fetching latest installer from $Repo@$Branch ...
 powershell -ExecutionPolicy Bypass -Command "irm '$InstallerUrl' | iex"
+goto :eof
+
+:rune_force_update
+echo [rune] force-refreshing agent_runner.py ...
+set RUNE_FORCE_UPDATE=1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BIN_DIR_PLACEHOLDER%\rune-update.ps1"
+set RUNE_FORCE_UPDATE=
 goto :eof
 
 :rune_uninstall
@@ -145,6 +247,10 @@ goto :eof
 :rune_version
 echo fcoin agent_runner.py at: %INSTALL_DIR%\agent_runner.py
 echo installer URL: %INSTALLER_URL%
+echo auto-update: every 6h on each invocation. Disable with RUNE_NO_AUTO_UPDATE=1 or RUNE_OFFLINE=1.
+if exist "%INSTALL_DIR%\agent_runner.py" (
+    powershell -NoProfile -Command "$mt=(Get-Item '%INSTALL_DIR%\agent_runner.py').LastWriteTimeUtc;$age=[int]((New-TimeSpan -Start $mt -End (Get-Date).ToUniversalTime()).TotalSeconds);Write-Host ('local agent_runner.py age: ' + [int]($age/3600) + 'h ' + [int](($age%3600)/60) + 'm')"
+)
 goto :eof
 
 :rune_status
@@ -154,6 +260,7 @@ echo AGENT_RUNNER = %PYBIN% %INSTALL_DIR%\agent_runner.py
 goto :eof
 
 :run_agent
+powershell -NoProfile -ExecutionPolicy Bypass -File "%BIN_DIR_PLACEHOLDER%\rune-update.ps1"
 "%PYBin%" "%INSTALL_DIR%\agent_runner.py" %*
 goto :eof
 
@@ -161,25 +268,35 @@ goto :eof
 echo Usage: rune [command] [args]
 echo.
 echo Subcommands:
-echo   update       re-run installer to fetch latest agent_runner.py
-echo   uninstall    remove the agent + shim
-echo   status       show install paths and saved agent identity
-echo   version      print install paths + installer URL
+echo   update             re-run installer to fetch latest agent_runner.py
+echo   force-update       refetch agent_runner.py right now
+echo   uninstall          remove the agent + shim
+echo   status             show install paths and saved agent identity
+echo   version            print install paths + freshness
 echo.
 echo Default forwards all remaining args to agent_runner.py:
 echo   rune --agent-id my-bot
 echo   rune --show-identity
 echo   rune --dry-run
 echo   rune --reset
+echo.
+echo Auto-update every 6h on each invocation. Disable with RUNE_NO_AUTO_UPDATE=1.
 "%PYBin%" "%INSTALL_DIR%\agent_runner.py" --help
 endlocal
-"@ | Set-Content -Path $runePath -Encoding ASCII
+"@ | ForEach-Object { $_ -replace '%BIN_DIR_PLACEHOLDER%', $BinDir } | Set-Content -Path $runePath -Encoding ASCII
 
 Say "installed $runePath"
+Say "installed $updaterPath"
 
 # Save the install URL alongside
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-"INSTALL_URL=$InstallerUrl" | Set-Content -Path (Join-Path $InstallDir '.rune-update-url') -Encoding ASCII
+@{
+    INSTALL_URL    = $RepoUrl
+    INSTALLER_URL  = $InstallerUrl
+    RUNNER_URL     = $RunnerUrl
+    BRANCH         = $Branch
+    INSTALLED_AT   = (Get-Date).ToUniversalTime().ToString('o')
+} | ConvertTo-Json | Set-Content -Path (Join-Path $InstallDir '.rune-update-url') -Encoding ASCII
 
 # ---- ensure BinDir on PATH ---------------------------------------------------
 $userPath = [Environment]::GetEnvironmentVariable('Path','User')

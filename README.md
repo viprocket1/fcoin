@@ -44,13 +44,30 @@ in your environment, **or** let it sniff any of these existing configs:
 | Codex CLI    | `~/.codex/auth.json`                         | `apiKey`             |
 | Claude Code  | `~/.claude/config.json`, `~/.claude.json`    | `apiKey`, snake_case |
 | OpenCode     | `~/.config/opencode/opencode.json`           | `provider.<name>.apiKey` |
-| Aider        | `~/.aider.<provider>.api.key`                | plain text           |
+| Continue.dev | `~/.continue/config.json`                    | `apiKey` (per-provider in `models[]`) |
+| Aider        | `~/.aider.<provider>.api.key`, `~/.aider.model.metadata.json` | plain text / JSON |
+| Windsurf / Codeium | `~/.codeium/config.json`               | `api_key` / `api_key_v2` / `access_token` (IDE itself uses SQLite, not sniffable) |
+| Zed AI       | `~/.config/zed/settings.json`                | `api_key` per provider (macOS uses Keychain) |
+| Jan.ai       | `~/jan/settings.json`                        | `apiKeys.<provider>`  |
 | Gemini CLI   | `~/.gemini/oauth_creds.json`                 | OAuth `access_token` (auto-routed to Gemini OpenAI-compat) |
 | Antigravity CLI | `~/.gemini/antigravity-cli/settings.json` | `apiKey` / `auth.apiKey` (uses OS keyring, keyring-disabled fallback only) |
 | gcloud ADC   | `~/.config/gcloud/application_default_credentials.json` | OAuth `access_token` (Google endpoints) |
 | `GOOGLE_APPLICATION_CREDENTIALS` env var | `<user-set path>` JSON | service-account (`client_email`/`private_key`, JWT-auth only — *not* auto-promoted) |
 | Firebase CLI | `~/.config/firebase/firebase-tools-rc.json` | `refresh_token` / `apiKey` |
 | generic      | `~/.env`, `~/.envrc`, `~/.netrc`             | `KEY=value` lines    |
+
+**Not auto-sniffable** (key in OS keyring / encrypted store / IDE-only binary):
+Cursor, Cline, Roo Code, Zed (macOS keychain), Claude Code on macOS, GitHub Copilot
+CLI (`~/.config/gh/hosts.yml` is YAML — no stdlib YAML reader), JetBrains AI
+Assistant. For those, `export ANTHROPIC_API_KEY=...` / `OPENAI_API_KEY=...`
+yourself, or install one of the above (e.g. Continue.dev) and put the key there.
+
+Standalone vendor keys (Mistral, DeepSeek, xAI/Grok, OpenRouter, Together,
+Fireworks, Perplexity, Cohere) have no first-party local client — set them as
+env vars (`MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`,
+`OPENROUTER_API_KEY`, `TOGETHER_API_KEY`, `FIREWORKS_API_KEY`,
+`PERPLEXITY_API_KEY`, `COHERE_API_KEY`) or in `~/.env`, and they'll be picked
+up by the generic env-file scan.
 
 When a `Hermes Agent` provider is detected, the runner also sets the matching
 `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` so the existing Anthropic-Messages or

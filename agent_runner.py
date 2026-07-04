@@ -238,6 +238,116 @@ _CRED_CANDIDATES: list[tuple[str, str, Path, tuple[tuple[str, ...], ...]]] = [
         Path.home() / ".config" / "firebase" / "firebase-tools-rc.json",
         (("refresh_token",), ("tokens", "refresh_token"),
          ("apiKey",), ("currentLogin", "refresh_token"))),
+
+    # --- Continue.dev (https://continue.dev) --------------------------------
+    # ~/.continue/config.json holds a `models` array; each entry can carry
+    # `provider`, `apiKey`, `apiBase`, etc. We only need the apiKey.
+    # Three provider flavors in the wild:
+    #   anthropic provider: {"provider":"anthropic","apiKey":"sk-ant-..."}
+    #   openai provider:    {"provider":"openai","apiKey":"sk-..."}
+    # Older flat layout:    {"apiKey":"..."}
+    # `key_paths` is JSON — we sniff whatever shows up at top level OR under
+    # `models[N].*` via the generic sub-rglob walk below (it'll pick those up).
+    ("anthropic", "Continue.dev",
+        Path.home() / ".continue" / "config.json",
+        (("apiKey",), ("anthropicApiKey",), ("anthropic_api_key",))),
+    ("openai",    "Continue.dev",
+        Path.home() / ".continue" / "config.json",
+        (("apiKey",), ("openAiApiKey",), ("openaiApiKey",),
+         ("openai_api_key",))),
+
+    # --- Windsurf / Codeium (https://codeium.com/windsurf) ------------------
+    # ~/.codeium/config.json plaintext. The Windsurf IDE itself stores tokens
+    # in a SQLite DB (state.vscdb → codeium.accessToken); TODO if we ever
+    # allow sqlite3 imports. The plaintext config is what users editing it
+    # by hand get; we accept both.
+    ("openai",    "Codeium (config)",
+        Path.home() / ".codeium" / "config.json",
+        (("api_key",), ("apiKey",), ("api_key_v2",),
+         ("access_token",), ("auth", "api_key"))),
+
+    # --- Jan.ai (https://jan.ai) --------------------------------------------
+    # ~/jan/settings.json — {apiKeys: {openai: "...", anthropic: "...", ...}}
+    # Schema: top-level `apiKeys` dict, key per provider name.
+    ("anthropic", "Jan.ai",
+        Path.home() / "jan" / "settings.json",
+        (("apiKeys", "anthropic"), ("apiKeys", "claude"),
+         ("apiKeys", "anthropic_api_key"))),
+    ("openai",    "Jan.ai",
+        Path.home() / "jan" / "settings.json",
+        (("apiKeys", "openai"), ("apiKeys", "gpt"),
+         ("apiKeys", "openai_api_key"))),
+
+    # --- Goose (Block, https://block.github.io/goose) ----------------------
+    # ~/.config/goose/config.yaml — YAML, provider `api_key` field.
+    # stdlib has no YAML reader; we rely on the sub-rglob walk to pick up
+    # `api_key` keys under any *.yaml file in ~/.config/goose.
+    # Listed here as a breadcrumb so the installer docs hint at the path.
+
+    # --- Aider chat-history provider config (newer schema) ------------------
+    # ~/.aider.model.metadata.json + ~/.aider.analytics.json + the legacy
+    # ~/.aider.anthropic.api.key files. The metadata file may carry an
+    # `api_key` field per provider in newer Aider versions.
+    ("anthropic", "Aider (metadata)",
+        Path.home() / ".aider.model.metadata.json",
+        (("anthropic_api_key",), ("anthropicApiKey",))),
+    ("openai",    "Aider (metadata)",
+        Path.home() / ".aider.model.metadata.json",
+        (("openai_api_key",), ("openaiApiKey",))),
+
+    # --- AWS Bedrock / Amazon Q CLI -----------------------------------------
+    # ~/.aws/credentials is INI (raw_api_key format is for the AWS access key
+    # + secret pair, not an LLM bearer). We still surface it so the
+    # installer can mention Bedrock in the "tried:" output — but we don't
+    # auto-adopt into ANTHROPIC_API_KEY/OPENAI_API_KEY (Bedrock uses SigV4).
+    # TODO: proper Bedrock adapter (separate call_bedrock() function).
+    # ("aws",       "AWS credentials",
+    #     Path.home() / ".aws" / "credentials",
+    #     (("aws_access_key_id",), ("aws_secret_access_key",))),
+
+    # --- GitHub Copilot / gh CLI --------------------------------------------
+    # ~/.config/gh/hosts.yml — YAML, `oauth_token:` under `github.com:`.
+    # No YAML reader in stdlib, so the sub-rglob walk below (which scans
+    # ~/.config/**/*.json only) misses this. We document the path; if the
+    # user installs `rune` with PyYAML available, the generic YAML walker
+    # (TODO) will pick it up. For now, surface in error messages.
+
+    # --- Cursor (https://cursor.com) ----------------------------------------
+    # SQLite at ~/.config/Cursor/User/globalStorage/state.vscdb, table
+    # ItemTable, keys `cursorAuth/accessToken` + `cursorAuth/refreshToken`.
+    # SQLite IS in stdlib (sqlite3) — TODO: read cursorAuth/* on demand.
+    # Skipped here to keep the dependency surface minimal; TODO comment.
+
+    # --- Cline / Roo Code (VSCode SQLite) -----------------------------------
+    # ~/.config/Code/User/globalStorage/{saoudrizwan.claude-dev,
+    # roo-cline.roo-cline}/state.vscdb — SecretStorage (libsecret on Linux).
+    # Keyring access requires `secretstorage` (non-stdlib). TODO.
+
+    # --- Zed AI (https://zed.dev) -------------------------------------------
+    # macOS: ~/Library/Application Support/Zed/settings.json (JSON)
+    # Linux: ~/.config/zed/settings.json (JSON) — `api_key` per provider
+    # Some Zed builds keep the key in libsecret instead — see TODO above.
+    ("anthropic", "Zed AI",
+        Path.home() / ".config" / "zed" / "settings.json",
+        (("api_key",), ("apiKey",), ("anthropic_api_key",))),
+    ("openai",    "Zed AI",
+        Path.home() / ".config" / "zed" / "settings.json",
+        (("api_key",), ("apiKey",), ("openai_api_key",))),
+
+    # --- Mistral / DeepSeek / xAI / OpenRouter / Together / Fireworks / -----
+    # Perplexity / Cohere — no first-party local client; keys live in env or
+    # in third-party tool configs (Continue, Cline, Cursor, Aider). The
+    # generic .env scan below picks them up if exported, so we don't add
+    # a dedicated entry here. (vendored as env-only; the README's
+    # 'tried these sources' list points users at the right env vars.)
+
+    # --- Ollama (local-only, no auth by default) ----------------------------
+    # No API key needed. We DO want to detect an Ollama install so the
+    # installer can suggest `OPENAI_BASE_URL=http://localhost:11434/v1`.
+    # That routing is handled in the Hermes PROVIDER_REDIRECTS map above
+    # when "ollama" appears in credential_pool. Local-standalone Ollama
+    # installs without Hermes don't have a creds file — we rely on the
+    # user setting OPENAI_BASE_URL manually.
 ]  # noqa: E501
 
 
@@ -394,8 +504,10 @@ def discover_credentials() -> dict[str, str]:
         # don't promote it — they should `export GEMINI_API_KEY=...` (or set up
         # `rune`'s ~/.env) and we'll route via the same base on the next pass.
 
-    # Walk sub-paths worth checking (Claude / OpenCode may use quirky layouts)
-    for root in (h / ".claude", h / ".config"):
+    # Walk sub-paths worth checking (Claude / OpenCode / Continue / Codeium
+    # may use quirky nested layouts we can't enumerate exhaustively).
+    for root in (h / ".claude", h / ".continue", h / ".codeium", h / "jan",
+                 h / ".config"):
         if not root.exists():
             continue
         for p in root.rglob("*.json"):
@@ -604,6 +716,12 @@ def main() -> None:
                   "OPENAI_API_KEY, or one of: GOOGLE_API_KEY / GEMINI_API_KEY, "
                   "or install one of: Codex CLI (~/.codex/auth.json), "
                   "Claude Code (~/.claude/config.json), "
+                  "OpenCode (~/.config/opencode/opencode.json), "
+                  "Continue.dev (~/.continue/config.json), "
+                  "Aider (~/.aider.anthropic.api.key), "
+                  "Windsurf/Codeium (~/.codeium/config.json), "
+                  "Jan.ai (~/jan/settings.json), "
+                  "Zed AI (~/.config/zed/settings.json), "
                   "Hermes Agent (~/.hermes/.env + ~/.hermes/auth.json), "
                   "Gemini CLI (~/.gemini/oauth_creds.json), "
                   "Antigravity CLI (~/.gemini/antigravity-cli/settings.json), "
@@ -611,7 +729,11 @@ def main() -> None:
                   "install stores creds in the OS keyring (per the Hermes "
                   "Agent antigravity-cli skill doc; upstream repo at "
                   "gazetteer/antigravity-cli — verify), so a keyring-stored "
-                  "Antigravity session is not directly sniffable from disk.",
+                  "Antigravity session is not directly sniffable from disk. "
+                  "Cursor, Cline, Roo Code, JetBrains AI, and GitHub Copilot "
+                  "CLI likewise store credentials in OS keyring / encrypted "
+                  "stores / YAML — export ANTHROPIC_API_KEY/OPENAI_API_KEY "
+                  "directly for those.",
                   file=sys.stderr)
             sys.exit(1)
 
