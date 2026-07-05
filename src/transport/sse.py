@@ -294,15 +294,193 @@ async def _get_prompt(request: Request) -> JSONResponse:
 
 
 async def _list_prompts(request: Request) -> JSONResponse:
-    """GET /prompts?status=open — list prompt requests."""
+    """GET /prompts?status=open|fulfilled|all&submitter=...&min_fee=...&limit=...
+
+    Filters:
+      status:    "open" (default), "fulfilled", "cancelled", "all"
+      submitter: filter by submitter agent_id
+      min_fee:   minimum fee_usdc (float)
+      limit:     max items to return (default 50, max 500)
+    """
     try:
         from ..prompts import prompt_market
-        status = request.query_params.get("status", "")
+        status = request.query_params.get("status", "open")
+        submitter = request.query_params.get("submitter", "")
+        min_fee_s = request.query_params.get("min_fee", "")
+        try:
+            min_fee = float(min_fee_s) if min_fee_s else 0.0
+        except ValueError:
+            min_fee = 0.0
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "50")), 500))
+        except ValueError:
+            limit = 50
+
         if status == "open":
             items = prompt_market.list_open_requests()
         else:
-            items = prompt_market.list_all_requests()
-        return JSONResponse({"prompts": items, "count": len(items)})
+            items = prompt_market.list_all_requests(limit=10000)
+
+        # apply filters
+        if submitter:
+            items = [p for p in items if p.get("submitter") == submitter]
+        if min_fee > 0:
+            items = [p for p in items if float(p.get("fee_usdc", 0)) >= min_fee]
+        if status != "open":
+            items = [p for p in items if p.get("status") == status or status == "all"]
+        if status == "fulfilled":
+            items = [p for p in items if p.get("status") == "fulfilled"]
+
+        items = items[:limit]
+        return JSONResponse({
+            "prompts": items,
+            "count": len(items),
+            "filters": {"status": status, "submitter": submitter, "min_fee": min_fee, "limit": limit},
+        })
+    except Exception as exc:
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _list_responses(request: Request) -> JSONResponse:
+    """GET /responses?agent=...&limit=...
+
+    Returns every response ever submitted to the marketplace, optionally
+    filtered by responding agent. Each row includes the original prompt
+    text + submitter so callers can audit the full conversation.
+    """
+    try:
+        from ..prompts import prompt_market
+        agent = request.query_params.get("agent", "")
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "50")), 500))
+        except ValueError:
+            limit = 50
+
+        with prompt_market._lock:  # noqa: SLF001 — internal but safe
+            # build a request-id -> request map for prompt text lookup
+            req_map = {r.id: r for r in prompt_market._requests.values()}
+            responses = list(prompt_market._responses.values())
+
+        out = []
+        for r in responses:
+            if agent and r.agent_id != agent:
+                continue
+            req = req_map.get(r.request_id)
+            out.append({
+                "id":            r.id,
+                "request_id":    r.request_id,
+                "agent_id":      r.agent_id,
+                "response":      r.response,
+                "created_at":    r.created_at,
+                "prompt":        req.prompt if req else None,
+                "submitter":     req.submitter if req else None,
+                "fee_usdc":      req.fee_usdc if req else None,
+            })
+
+        # newest first
+        out.sort(key=lambda x: x.get("created_at", 0), reverse=True)
+        out = out[:limit]
+        return JSONResponse({
+            "responses": out,
+            "count": len(out),
+            "filters": {"agent": agent, "limit": limit},
+        })
+    except Exception as exc:
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _earnings(request: Request) -> JSONResponse:
+    """GET /earnings?agent=...
+
+    Per-agent (or global) earnings ledger:
+      total_usdc_earned, response_count, prompts_answered, prompts_submitted
+    """
+    try:
+        from ..prompts import prompt_market
+        agent = request.query_params.get("agent", "")
+
+        with prompt_market._lock:  # noqa: SLF001
+            reqs = list(prompt_market._requests.values())
+            responses = list(prompt_market._responses.values())
+
+        # per-agent rollup
+        rollup: dict[str, dict] = {}
+        for r in reqs:
+            sid = r.submitter
+            row = rollup.setdefault(sid, {"submitted": 0, "spent_usdc": 0.0,
+                                          "answered": 0, "earned_usdc": 0.0})
+            row["submitted"] += 1
+            # only count fee as "spent" if any responses came back
+            paid = min(len(r.responses), r.max_responses) * r.fee_usdc
+            row["spent_usdc"] += paid
+            row["answered"] += len(r.responses)
+        for resp in responses:
+            r = next((x for x in reqs if x.id == resp.request_id), None)
+            if r is None:
+                continue
+            row = rollup.setdefault(resp.agent_id, {"submitted": 0, "spent_usdc": 0.0,
+                                                    "answered": 0, "earned_usdc": 0.0})
+            # they earned fee_usdc per response, capped at max_responses
+            earned = r.fee_usdc
+            row["earned_usdc"] += earned
+            row["answered"] += 1
+
+        if agent:
+            return JSONResponse({
+                "agent": agent,
+                **(rollup.get(agent, {"submitted": 0, "spent_usdc": 0.0,
+                                       "answered": 0, "earned_usdc": 0.0})),
+            })
+        # global + per-agent
+        return JSONResponse({
+            "agents": rollup,
+            "count":  len(rollup),
+            "totals": {
+                "prompts":      sum(r["submitted"] for r in rollup.values()),
+                "responses":    sum(r["answered"] for r in rollup.values()),
+                "usdc_paid":    sum(r["earned_usdc"] for r in rollup.values()),
+                "usdc_locked":  sum(r["spent_usdc"] for r in rollup.values()),
+            },
+        })
+    except Exception as exc:
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _stats(request: Request) -> JSONResponse:
+    """GET /stats — global market stats.
+
+    No auth, no filters. Returns totals + a leaderboard of top earners.
+    """
+    try:
+        from ..prompts import prompt_market
+        with prompt_market._lock:  # noqa: SLF001
+            reqs = list(prompt_market._requests.values())
+            responses = list(prompt_market._responses.values())
+
+        by_status: dict[str, int] = {}
+        total_fees = 0.0
+        for r in reqs:
+            by_status[r.status] = by_status.get(r.status, 0) + 1
+            total_fees += r.fee_usdc * r.max_responses
+
+        # top earners
+        earned: dict[str, float] = {}
+        for resp in responses:
+            earned[resp.agent_id] = earned.get(resp.agent_id, 0.0) + \
+                next((r.fee_usdc for r in reqs if r.id == resp.request_id), 0.0)
+        top = sorted(earned.items(), key=lambda kv: kv[1], reverse=True)[:10]
+
+        return JSONResponse({
+            "prompts": {
+                "total":      len(reqs),
+                "by_status":  by_status,
+                "total_fees_locked": total_fees,
+            },
+            "responses": {
+                "total": len(responses),
+            },
+            "top_earners": [{"agent": a, "earned_usdc": e} for a, e in top],
+        })
     except Exception as exc:
         return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
 
@@ -455,6 +633,9 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/submit_prompt", _submit_prompt, methods=["POST"])
     app.add_route("/respond_prompt", _respond_prompt, methods=["POST"])
     app.add_route("/prompts", _list_prompts, methods=["GET"])
+    app.add_route("/responses", _list_responses, methods=["GET"])
+    app.add_route("/earnings", _earnings, methods=["GET"])
+    app.add_route("/stats", _stats, methods=["GET"])
     app.add_route("/prompt/{id}", _get_prompt, methods=["GET"])
     app.add_route("/prompt/{id}", _cancel_prompt, methods=["DELETE"])
     app.add_route("/register", _register, methods=["POST"])
