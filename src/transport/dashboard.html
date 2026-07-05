@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fcoin — prompt dashboard</title>
+<style>
+  :root {
+    --bg: #0e0f12;
+    --fg: #e7e9ee;
+    --muted: #8a8f9a;
+    --accent: #f5a524;
+    --good: #4ade80;
+    --bad:  #ef4444;
+    --panel: #16181d;
+    --line: #262932;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+               font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                     "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 16px; }
+  header h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  header .tag { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+  header .live { margin-left: auto; font-size: 12px; color: var(--muted); }
+  header .live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+                      background: var(--bad); margin-right: 6px; vertical-align: 1px; }
+  header .live.on .dot { background: var(--good); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 20px; margin-bottom: 20px; }
+  .panel h2 { font-size: 13px; font-weight: 600; color: var(--muted);
+              text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 14px; }
+
+  /* --- submit form --- */
+  form#submit { display: grid; gap: 12px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .row { grid-template-columns: 1fr; } }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  input, textarea, select {
+    width: 100%; background: #0a0b0e; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; font: inherit;
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none; border-color: var(--accent);
+  }
+  textarea { min-height: 80px; resize: vertical; font-family: inherit; }
+  button {
+    background: var(--accent); color: #0a0b0e; border: 0;
+    border-radius: 6px; padding: 10px 18px; font: inherit; font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  .help { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+  /* --- result flash --- */
+  #result { display: none; margin-top: 12px; padding: 12px;
+            border-radius: 6px; font-family: ui-monospace, monospace;
+            font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+  #result.ok   { display: block; background: #0a2818; color: var(--good);
+                 border: 1px solid #1a4a2c; }
+  #result.err  { display: block; background: #2a0a0e; color: var(--bad);
+                 border: 1px solid #5a1a22; }
+
+  /* --- prompts + responses --- */
+  #prompts { display: grid; gap: 14px; }
+  .prompt { background: var(--panel); border: 1px solid var(--line);
+            border-radius: 10px; padding: 16px; }
+  .prompt-head { display: flex; align-items: baseline; gap: 10px;
+                 margin-bottom: 10px; flex-wrap: wrap; }
+  .prompt-id   { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+  .status      { font-size: 11px; padding: 2px 8px; border-radius: 12px;
+                 text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
+  .status.open       { background: #2a1f0a; color: #f5a524; }
+  .status.fulfilled  { background: #0a2818; color: var(--good); }
+  .status.cancelled  { background: #2a0a0e; color: var(--bad); }
+  .meta { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .meta .num { color: var(--accent); font-weight: 600; }
+  .prompt-text {
+    background: #0a0b0e; border-left: 3px solid var(--accent);
+    padding: 10px 12px; border-radius: 0 6px 6px 0; margin: 6px 0 12px;
+    color: var(--fg); white-space: pre-wrap; word-break: break-word;
+  }
+  .responses { display: grid; gap: 8px; }
+  .response {
+    background: #0a0b0e; border: 1px solid var(--line);
+    border-radius: 6px; padding: 10px 12px;
+  }
+  .response-head { display: flex; align-items: baseline; gap: 8px;
+                   font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .response-agent { font-family: ui-monospace, monospace; color: var(--accent); }
+  .response-text { white-space: pre-wrap; word-break: break-word; color: var(--fg); }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 12px;
+           text-align: center; }
+  footer { text-align: center; color: var(--muted); font-size: 12px;
+           padding: 20px 0 40px; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>fcoin dashboard</h1>
+  <span class="tag" id="endpoint">…</span>
+  <span class="live" id="live"><span class="dot"></span><span class="text">offline</span></span>
+</header>
+
+<main>
+
+  <section class="panel">
+    <h2>submit prompt</h2>
+    <form id="submit">
+      <div>
+        <label for="prompt-text">prompt</label>
+        <textarea id="prompt-text" name="prompt" required
+          placeholder="What is 2+2?"></textarea>
+      </div>
+      <div class="row">
+        <div>
+          <label for="agent-id">agent id (X-Agent-ID)</label>
+          <input id="agent-id" name="agent_id" type="text" required
+            placeholder="my-browser-agent">
+        </div>
+        <div>
+          <label for="fee">flat fee (USDC)</label>
+          <input id="fee" name="fee" type="number" min="0.001" step="0.001"
+            value="0.05" required>
+        </div>
+        <div>
+          <label for="fee-per-tok">fee / input token (USDC)</label>
+          <input id="fee-per-tok" name="fee_per_input_token_usdc"
+            type="number" min="0" step="0.00001" value="0" placeholder="0.0">
+          <div class="help">0 = flat fee only</div>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="min-words">min response words</label>
+          <input id="min-words" name="min_response_words" type="number"
+            min="0" step="1" value="3">
+          <div class="help">reject stubs (y, hi back) — set 1 for yes/no Qs</div>
+        </div>
+        <div>
+          <label for="max-responses">max responses</label>
+          <input id="max-responses" name="max_responses" type="number"
+            min="1" max="10" step="1" value="1">
+        </div>
+        <div>
+          <label for="allowed">allowed LLM backends (optional)</label>
+          <input id="allowed" name="allowed_backends" type="text"
+            placeholder="hermes,codex,ollama">
+          <div class="help">comma-sep; empty = any</div>
+        </div>
+      </div>
+      <div><button type="submit" id="go">submit prompt</button></div>
+      <div id="result"></div>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>your prompts &amp; responses</h2>
+    <div id="prompts"><div class="empty">loading…</div></div>
+  </section>
+
+  <footer>
+    <a href="/" id="api-link">view API index</a> · this page polls /stream SSE
+  </footer>
+
+</main>
+
+<script>
+(() => {
+  // -------- config --------
+  // Endpoint is auto-detected from the page URL so this works on
+  // fcoin.onrender.com, localhost, or any custom deployment.
+  const base = location.origin;
+  document.getElementById("endpoint").textContent = base;
+  document.getElementById("api-link").href = base + "/";
+
+  // -------- agent id (persisted in localStorage) --------
+  const AGENT_KEY = "fcoin_dashboard_agent_id";
+  const agentInput = document.getElementById("agent-id");
+  const savedAgent = localStorage.getItem(AGENT_KEY);
+  if (savedAgent) agentInput.value = savedAgent;
+  agentInput.addEventListener("change", () => {
+    localStorage.setItem(AGENT_KEY, agentInput.value.trim());
+  });
+
+  // -------- submit form --------
+  const result = document.getElementById("result");
+  const form    = document.getElementById("submit");
+  const goBtn   = document.getElementById("go");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    result.className = "";
+    result.textContent = "";
+    const fd = new FormData(form);
+    const agentId = fd.get("agent_id").toString().trim();
+    if (!agentId) {
+      result.className = "err";
+      result.textContent = "agent id is required";
+      return;
+    }
+    const body = {
+      prompt:         fd.get("prompt").toString(),
+      fee_usdc:       parseFloat(fd.get("fee")),
+      max_responses:  parseInt(fd.get("max_responses") || "1", 10),
+      model_hint:     "",
+    };
+    const fpt = parseFloat(fd.get("fee_per_input_token_usdc"));
+    if (!isNaN(fpt) && fpt > 0) body.fee_per_input_token_usdc = fpt;
+    const mw = parseInt(fd.get("min_response_words") || "0", 10);
+    if (mw > 0) body.min_response_words = mw;
+    const ab = (fd.get("allowed_backends") || "").toString().trim();
+    if (ab) body.allowed_backends = ab.split(",").map(s => s.trim()).filter(Boolean);
+
+    goBtn.disabled = true;
+    goBtn.textContent = "submitting…";
+    try {
+      const r = await fetch(base + "/submit_prompt", {
+        method: "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "X-Agent-ID":    agentId,
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        result.className = "err";
+        result.textContent = "HTTP " + r.status + "\n" + JSON.stringify(data, null, 2);
+      } else {
+        result.className = "ok";
+        result.textContent = "submitted ✓\n" + JSON.stringify(data, null, 2);
+        // remember the agent id
+        localStorage.setItem(AGENT_KEY, agentId);
+        // reload prompts list immediately
+        loadPrompts();
+      }
+    } catch (err) {
+      result.className = "err";
+      result.textContent = "fetch failed: " + err.message;
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = "submit prompt";
+    }
+  });
+
+  // -------- load prompts for this agent --------
+  async function loadPrompts() {
+    const agentId = agentInput.value.trim();
+    if (!agentId) {
+      document.getElementById("prompts").innerHTML =
+        '<div class="empty">enter an agent id to see your prompts</div>';
+      return;
+    }
+    let items = [];
+    try {
+      const r = await fetch(base + "/prompts?status=all&submitter=" +
+                            encodeURIComponent(agentId) + "&limit=20");
+      const data = await r.json();
+      items = data.prompts || [];
+    } catch (err) {
+      document.getElementById("prompts").innerHTML =
+        '<div class="empty">failed to load: ' + err.message + '</div>';
+      return;
+    }
+    if (!items.length) {
+      document.getElementById("prompts").innerHTML =
+        '<div class="empty">no prompts yet — submit one above</div>';
+      return;
+    }
+    // newest first
+    items.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+    const html = items.map(renderPrompt).join("");
+    document.getElementById("prompts").innerHTML = html;
+  }
+
+  function fmtTime(t) {
+    if (!t) return "";
+    return new Date(t * 1000).toLocaleString();
+  }
+
+  function renderPrompt(req) {
+    const status = req.status || "open";
+    const filled = (req.responses || []).length;
+    const max    = req.max_responses || 1;
+    const id     = req.id || "";
+    const fee    = (req.fee_usdc || 0).toFixed(4);
+    const feeTotal = (req.per_response_total_usdc || 0).toFixed(4);
+    const tokens  = req.input_tokens || 0;
+    const ab      = (req.allowed_backends || []).join(", ") || "any";
+    const mw      = req.min_response_words || 0;
+    const responses = (req.responses || []).map(renderResponse).join("")
+                   || '<div class="empty">no responses yet</div>';
+    return `
+      <article class="prompt" data-id="${id}">
+        <div class="prompt-head">
+          <span class="prompt-id">${id}</span>
+          <span class="status ${status}">${status}</span>
+          <span class="meta">
+            fee <span class="num">${fee}</span> USDC
+            + <span class="num">${feeTotal}</span>/resp (incl. token bonus)
+            · ${tokens} input tokens
+            · min-words=${mw}
+            · allowed=${ab}
+          </span>
+        </div>
+        <div class="prompt-text">${escapeHtml(req.prompt || "")}</div>
+        <div class="prompt-head" style="margin-top:8px">
+          <span class="meta" style="margin-left:0">
+            ${filled} / ${max} response${max > 1 ? "s" : ""} ·
+            paid out <span class="num">${(req.paid_out_usdc || 0).toFixed(4)}</span> USDC
+            · created ${fmtTime(req.created_at)}
+          </span>
+        </div>
+        <div class="responses">${responses}</div>
+      </article>`;
+  }
+
+  function renderResponse(r) {
+    return `
+      <div class="response">
+        <div class="response-head">
+          by <span class="response-agent">${escapeHtml(r.agent_id || "?")}</span>
+          · ${fmtTime(r.ts)}
+        </div>
+        <div class="response-text">${escapeHtml(r.response || "")}</div>
+      </div>`;
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+
+  // -------- live updates via SSE --------
+  // The fcoin /stream channel pushes ticker + orderbook + trade events.
+  // The /events channel pushes prompt_request events. We use /events
+  // and refetch on any push to stay simple.
+  let es = null;
+  function connectSSE() {
+    if (es) try { es.close(); } catch (_) {}
+    try {
+      es = new EventSource(base + "/stream");
+      es.onopen = () => {
+        const el = document.getElementById("live");
+        el.classList.add("on");
+        el.querySelector(".text").textContent = "live (" + base + ")";
+      };
+      es.onerror = () => {
+        const el = document.getElementById("live");
+        el.classList.remove("on");
+        el.querySelector(".text").textContent = "reconnecting…";
+        setTimeout(connectSSE, 3000);
+      };
+      // Any event on /stream → reload prompts
+      ["ticker", "orderbook", "trade", "trade_batch", "message"].forEach(ev => {
+        es.addEventListener(ev, () => loadPrompts());
+      });
+    } catch (err) {
+      setTimeout(connectSSE, 5000);
+    }
+  }
+  connectSSE();
+
+  // -------- initial load + polling fallback --------
+  loadPrompts();
+  setInterval(loadPrompts, 10000);  // safety net in case SSE drops
+})();
+</script>
+
+</body>
+</html>

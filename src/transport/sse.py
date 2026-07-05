@@ -12,13 +12,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..server import MCPServer
 
 from ..stream import market_stream
-from starlette.responses import StreamingResponse
+from starlette.responses import FileResponse, StreamingResponse
 
 log = logging.getLogger("fcoin.mcp.sse")
 
@@ -41,12 +42,24 @@ async def _health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+async def _dashboard(request: Request) -> FileResponse:
+    """GET /dashboard — single-page HTML UI.
+
+    Lets you submit prompts from a browser and see the responses come in
+    live over SSE. No JS framework, no build step. Endpoint URL is
+    auto-detected from the page so this works on any deployment.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard.html"))
+
+
 # Registry of every API endpoint with a one-line description. Used by
 # GET / to render a navigable index. The list mirrors the routes
 # registered in run_sse() — keep them in sync when adding new routes.
 API_INDEX: list[dict] = [
     # --- health / status ---
     {"method": "GET",  "path": "/",            "name": "index",        "desc": "this page: every API endpoint with descriptions"},
+    {"method": "GET",  "path": "/dashboard",  "name": "dashboard",    "desc": "single-page HTML UI: submit prompts, watch responses live"},
     {"method": "GET",  "path": "/health",      "name": "health",       "desc": "liveness check for Render / load balancers"},
 
     # --- market data ---
@@ -730,6 +743,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
 
     app = Starlette()
     app.add_route("/", _index, methods=["GET"])
+    app.add_route("/dashboard", _dashboard, methods=["GET"])
     app.add_route("/health", _health, methods=["GET"])
     app.add_route("/ticker", _ticker, methods=["GET"])
     app.add_route("/portfolio", _portfolio, methods=["GET"])
