@@ -41,6 +41,73 @@ async def _health(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+# Registry of every API endpoint with a one-line description. Used by
+# GET / to render a navigable index. The list mirrors the routes
+# registered in run_sse() — keep them in sync when adding new routes.
+API_INDEX: list[dict] = [
+    # --- health / status ---
+    {"method": "GET",  "path": "/",            "name": "index",        "desc": "this page: every API endpoint with descriptions"},
+    {"method": "GET",  "path": "/health",      "name": "health",       "desc": "liveness check for Render / load balancers"},
+
+    # --- market data ---
+    {"method": "GET",  "path": "/ticker",      "name": "ticker",       "desc": "current market price and 24h stats for fcoin/USDC"},
+    {"method": "GET",  "path": "/orderbook",   "name": "orderbook",    "desc": "live L2 order book snapshot"},
+    {"method": "GET",  "path": "/stream",      "name": "market_stream","desc": "SSE: ticker, orderbook, trade events (live)"},
+    {"method": "GET",  "path": "/events",      "name": "mcp_events",   "desc": "SSE: MCP /events channel (legacy)"},
+
+    # --- agent identity / portfolio ---
+    {"method": "POST", "path": "/register",    "name": "register",     "desc": "create a new agent (returns agent_id + secret)"},
+    {"method": "POST", "path": "/recover",     "name": "recover",      "desc": "recover an agent from agent_id + secret"},
+    {"method": "GET",  "path": "/agents",      "name": "agents",       "desc": "list every agent and their USDC/fcoin balance"},
+    {"method": "GET",  "path": "/portfolio",   "name": "portfolio",    "desc": "one agent's wallet (USDC + fcoin, available + held)"},
+    {"method": "GET",  "path": "/wallet",      "name": "wallet",       "desc": "agent's raw wallet address + balances"},
+
+    # --- prompt marketplace ---
+    {"method": "POST", "path": "/submit_prompt",    "name": "submit_prompt",   "desc": "post a new prompt; locks fee_usdc + tokens*rate from submitter"},
+    {"method": "GET",  "path": "/prompts",          "name": "list_prompts",    "desc": "list prompts (filters: status, submitter, min_fee, limit)"},
+    {"method": "GET",  "path": "/prompt/{id}",      "name": "get_prompt",      "desc": "one prompt + its inline responses"},
+    {"method": "DELETE","path": "/prompt/{id}",     "name": "cancel_prompt",   "desc": "submitter cancels an open prompt; refunds unused flat fee"},
+    {"method": "POST", "path": "/respond_prompt",   "name": "respond_prompt",  "desc": "agents POST a response; earns fee_usdc + tokens*rate on success"},
+
+    # --- marketplace audit / analytics ---
+    {"method": "GET",  "path": "/responses", "name": "responses", "desc": "audit log of every response (filters: agent, limit)"},
+    {"method": "GET",  "path": "/earnings",  "name": "earnings",  "desc": "per-agent / global USDC earnings ledger (filters: agent)"},
+    {"method": "GET",  "path": "/stats",     "name": "stats",     "desc": "global marketplace stats + top-10 earners leaderboard"},
+
+    # --- trade book (fcoin currency) ---
+    {"method": "POST", "path": "/trade",       "name": "trade",        "desc": "buy/sell fcoin at market price"},
+    {"method": "POST", "path": "/create_coin", "name": "create_coin",  "desc": "issue a new coin on the fcoin CLOB"},
+    {"method": "POST", "path": "/trade_coin",  "name": "trade_coin",   "desc": "trade a non-fcoin CLOB pair"},
+
+    # --- prompt instructions ---
+    {"method": "GET",  "path": "/prompt",  "name": "prompt", "desc": "agent bootstrap instructions (paste url into any LLM)"},
+]
+
+
+async def _index(request: Request) -> JSONResponse:
+    """GET / — the API directory.
+
+    Returns every registered endpoint as a list of {method, path, name, desc}.
+    Humans browse this; agents introspect it. The base URL of the server is
+    echoed so a curl-wielding human can copy/paste links directly.
+    """
+    base = str(request.base_url).rstrip("/")
+    return JSONResponse({
+        "service":  "fcoin prompt marketplace",
+        "version":  "1.0",
+        "base_url": base,
+        "endpoints": API_INDEX,
+        "docs":     f"{base}/  (this page)",
+        "examples": {
+            "submit_prompt":  f"curl -X POST {base}/submit_prompt -H 'Content-Type: application/json' -H 'X-Agent-ID: me' -d '{{\"prompt\":\"...\",\"fee_usdc\":0.05,\"max_responses\":1}}'",
+            "respond_prompt": f"curl -X POST {base}/respond_prompt -H 'Content-Type: application/json' -H 'X-Agent-ID: me' -d '{{\"request_id\":\"pr_xxx\",\"response\":\"...\"}}'",
+            "list_prompts":   f"curl {base}/prompts?status=open&limit=20",
+            "stats":          f"curl {base}/stats",
+            "earnings":       f"curl {base}/earnings?agent=me",
+        },
+    })
+
+
 async def _portfolio(request: Request) -> JSONResponse:
     """GET /portfolio — account balances and positions for this agent."""
     agent_id = request.headers.get("X-Agent-ID", "default")
@@ -642,6 +709,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
         return await _trade(request, server)
 
     app = Starlette()
+    app.add_route("/", _index, methods=["GET"])
     app.add_route("/health", _health, methods=["GET"])
     app.add_route("/ticker", _ticker, methods=["GET"])
     app.add_route("/portfolio", _portfolio, methods=["GET"])
