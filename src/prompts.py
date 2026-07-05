@@ -64,6 +64,16 @@ class PromptMarket:
         self._min_response_len = 1          # accept any non-empty response (let the market judge)
         self._max_response_len = 8000
         self._min_fee_usdc    = 0.001       # reject zero-fee spam
+        # --- persistence ---
+        # Back the market with a JSON file so it survives Render redeploys.
+        # We don't lock the file (the in-memory lock is enough for the single-process
+        # fcoin server); we just write atomically.
+        import os as _os
+        self._persist_path = _os.environ.get(
+            "FCOIN_PROMPTS_PATH",
+            "/data/data/com.termux/files/home/fcoin/prompts_store.json",
+        )
+        self._load()
 
     # ------------------------------------------------------------------ submitter side
 
@@ -120,6 +130,7 @@ class PromptMarket:
 
         # Broadcast to all connected agents via the SSE stream
         self._broadcast_request(req)
+        self._save()              # persist after every mutation
         return self._request_view(req)
 
     # ------------------------------------------------------------------ agent side
@@ -198,6 +209,7 @@ class PromptMarket:
             f"earned={req.fee_usdc:.4f}  status={req.status}"
         )
 
+        self._save()              # persist after every mutation
         return {
             "response_id":   resp_id,
             "request_id":    request_id,
@@ -267,6 +279,7 @@ class PromptMarket:
                 wallet._balances["usdc"] = b
             b.available += remaining
             wallet.sync_to_store(ex._store)
+        self._save()              # persist after every mutation
         return self.get_request(request_id)
 
     # ------------------------------------------------------------------ internals
@@ -299,6 +312,103 @@ class PromptMarket:
             },
         }
         market_stream.broadcast(payload)
+
+    # ------------------------------------------------------------------ persistence
+
+    def _load(self) -> None:
+        """Load prompts + responses from the JSON store, if it exists.
+
+        Silently no-ops if the file is missing or corrupt. We never want a
+        bad store file to take the server down.
+        """
+        import os, json as _json
+        path = self._persist_path
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = _json.load(f)
+        except Exception as e:
+            log.warning(f"[prompts] could not read {path}: {e}")
+            return
+        with self._lock:
+            for pr_data in raw.get("requests", []):
+                try:
+                    req = PromptRequest(
+                        id=pr_data["id"],
+                        submitter=pr_data["submitter"],
+                        prompt=pr_data["prompt"],
+                        fee_usdc=float(pr_data["fee_usdc"]),
+                        max_responses=int(pr_data.get("max_responses", 1)),
+                        model_hint=pr_data.get("model_hint", ""),
+                    )
+                    req.created_at = float(pr_data.get("created_at", req.created_at))
+                    req.status = pr_data.get("status", "open")
+                    # rebuild the responses list from the response rows that
+                    # reference this request
+                    req.responses = list(pr_data.get("responses_inline", []))
+                    req.paid_out_usdc = float(pr_data.get("paid_out_usdc", 0.0))
+                    self._requests[req.id] = req
+                except Exception as e:
+                    log.warning(f"[prompts] skip bad request row: {e}")
+            for rp_data in raw.get("responses", []):
+                try:
+                    rp = PromptResponse(
+                        id=rp_data["id"],
+                        request_id=rp_data["request_id"],
+                        agent_id=rp_data["agent_id"],
+                        response=rp_data["response"],
+                    )
+                    rp.created_at = float(rp_data.get("created_at", rp.created_at))
+                    self._responses[rp.id] = rp
+                except Exception as e:
+                    log.warning(f"[prompts] skip bad response row: {e}")
+        log.info(f"[prompts] loaded {len(self._requests)} requests, {len(self._responses)} responses from {path}")
+
+    def _save(self) -> None:
+        """Atomically write prompts + responses to the JSON store."""
+        import os, json as _json, tempfile
+        with self._lock:
+            payload = {
+                "requests": [
+                    {
+                        "id":             r.id,
+                        "submitter":      r.submitter,
+                        "prompt":         r.prompt,
+                        "fee_usdc":       r.fee_usdc,
+                        "max_responses":  r.max_responses,
+                        "model_hint":     r.model_hint,
+                        "status":         r.status,
+                        "created_at":     r.created_at,
+                        "paid_out_usdc":  r.paid_out_usdc,
+                        # store responses inline so we don't have to join on reload
+                        "responses_inline": list(r.responses),
+                    }
+                    for r in self._requests.values()
+                ],
+                "responses": [
+                    {
+                        "id":          r.id,
+                        "request_id":  r.request_id,
+                        "agent_id":    r.agent_id,
+                        "response":    r.response,
+                        "created_at":  r.created_at,
+                    }
+                    for r in self._responses.values()
+                ],
+            }
+        # atomic write: tmp file in same dir, fsync, rename
+        path = self._persist_path
+        d = os.path.dirname(path) or "."
+        try:
+            fd, tmp = tempfile.mkstemp(prefix=".prompts-", dir=d)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(_json.dumps(payload, indent=2))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except Exception as e:
+            log.warning(f"[prompts] could not save to {path}: {e}")
 
 
 # Global singleton
