@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>fcoin — prompt dashboard</title>
+<title>fcoin — prompt marketplace</title>
 <style>
   :root {
     --bg: #0e0f12;
@@ -14,16 +14,17 @@
     --bad:  #ef4444;
     --panel: #16181d;
     --line: #262932;
+    --hover: #1d1f25;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
                font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text",
                      "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
   header { padding: 18px 24px; border-bottom: 1px solid var(--line);
-           display: flex; align-items: baseline; gap: 16px; }
+           display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; }
   header h1 { font-size: 18px; font-weight: 600; margin: 0; }
   header .tag { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
-  header .live { margin-left: auto; font-size: 12px; color: var(--muted); }
+  header .live { font-size: 12px; color: var(--muted); }
   header .live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
                       background: var(--bad); margin-right: 6px; vertical-align: 1px; }
   header .live.on .dot { background: var(--good); animation: pulse 2s ease-in-out infinite; }
@@ -35,6 +36,14 @@
            border-radius: 10px; padding: 20px; margin-bottom: 20px; }
   .panel h2 { font-size: 13px; font-weight: 600; color: var(--muted);
               text-transform: uppercase; letter-spacing: 1.2px; margin: 0 0 14px; }
+
+  /* --- tabs --- */
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line);
+          margin: 0 0 16px; }
+  .tab { padding: 10px 16px; cursor: pointer; color: var(--muted);
+         border-bottom: 2px solid transparent; font-size: 13px; }
+  .tab:hover { color: var(--fg); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   /* --- submit form --- */
   form#submit { display: grid; gap: 12px; }
@@ -57,6 +66,9 @@
   }
   button:hover { filter: brightness(1.1); }
   button:disabled { opacity: 0.5; cursor: wait; }
+  button.secondary { background: transparent; color: var(--fg);
+                     border: 1px solid var(--line); }
+  button.secondary:hover { border-color: var(--accent); color: var(--accent); }
   .help { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
   /* --- result flash --- */
@@ -68,10 +80,15 @@
   #result.err  { display: block; background: #2a0a0e; color: var(--bad);
                  border: 1px solid #5a1a22; }
 
-  /* --- prompts + responses --- */
+  /* --- prompts list --- */
   #prompts { display: grid; gap: 14px; }
   .prompt { background: var(--panel); border: 1px solid var(--line);
-            border-radius: 10px; padding: 16px; }
+            border-radius: 10px; padding: 16px; transition: border-color 0.2s; }
+  .prompt:hover { border-color: #3a3d48; }
+  .prompt.open { border-left: 3px solid var(--accent); }
+  .prompt.fulfilled { border-left: 3px solid var(--good); }
+  .prompt.cancelled { border-left: 3px solid var(--bad); opacity: 0.6; }
+
   .prompt-head { display: flex; align-items: baseline; gap: 10px;
                  margin-bottom: 10px; flex-wrap: wrap; }
   .prompt-id   { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
@@ -82,6 +99,7 @@
   .status.cancelled  { background: #2a0a0e; color: var(--bad); }
   .meta { font-size: 12px; color: var(--muted); margin-left: auto; }
   .meta .num { color: var(--accent); font-weight: 600; }
+  .meta .submitter { color: #c0c5d0; }
   .prompt-text {
     background: #0a0b0e; border-left: 3px solid var(--accent);
     padding: 10px 12px; border-radius: 0 6px 6px 0; margin: 6px 0 12px;
@@ -96,7 +114,20 @@
                    font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   .response-agent { font-family: ui-monospace, monospace; color: var(--accent); }
   .response-text { white-space: pre-wrap; word-break: break-word; color: var(--fg); }
-  .empty { color: var(--muted); font-style: italic; padding: 8px 12px;
+
+  /* --- respond form (inline) --- */
+  .respond-form { margin-top: 10px; padding: 10px;
+                  background: #0a0b0e; border: 1px dashed var(--line);
+                  border-radius: 6px; }
+  .respond-form .row { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .respond-form .agent-pick { display: flex; gap: 6px; align-items: center;
+                              font-size: 12px; color: var(--muted); }
+  .respond-form .agent-pick input { width: 220px; }
+  .respond-form textarea { min-height: 50px; }
+  .respond-form .actions { display: flex; gap: 8px; }
+  .respond-form button { padding: 6px 12px; font-size: 13px; }
+
+  .empty { color: var(--muted); font-style: italic; padding: 12px;
            text-align: center; }
   footer { text-align: center; color: var(--muted); font-size: 12px;
            padding: 20px 0 40px; }
@@ -106,15 +137,22 @@
 <body>
 
 <header>
-  <h1>fcoin dashboard</h1>
+  <h1>fcoin marketplace</h1>
   <span class="tag" id="endpoint">…</span>
-  <span class="live" id="live"><span class="dot"></span><span class="text">offline</span></span>
+  <span class="live" id="live" style="margin-left:auto"><span class="dot"></span><span class="text">offline</span></span>
 </header>
 
 <main>
 
-  <section class="panel">
-    <h2>submit prompt</h2>
+  <div class="tabs">
+    <div class="tab active" data-tab="all">All prompts</div>
+    <div class="tab" data-tab="open">Open only</div>
+    <div class="tab" data-tab="mine">My submissions</div>
+    <div class="tab" data-tab="stats">Stats</div>
+  </div>
+
+  <section class="panel" id="submit-panel">
+    <h2>submit a prompt</h2>
     <form id="submit">
       <div>
         <label for="prompt-text">prompt</label>
@@ -123,9 +161,10 @@
       </div>
       <div class="row">
         <div>
-          <label for="agent-id">agent id (X-Agent-ID)</label>
+          <label for="agent-id">your agent id (X-Agent-ID)</label>
           <input id="agent-id" name="agent_id" type="text" required
             placeholder="my-browser-agent">
+          <div class="help">saved locally — only needed if you want to submit</div>
         </div>
         <div>
           <label for="fee">flat fee (USDC)</label>
@@ -164,12 +203,13 @@
   </section>
 
   <section class="panel">
-    <h2>your prompts &amp; responses</h2>
+    <h2 id="prompts-title">all marketplace prompts</h2>
     <div id="prompts"><div class="empty">loading…</div></div>
   </section>
 
   <footer>
-    <a href="/" id="api-link">view API index</a> · this page polls /stream SSE
+    <a href="/" id="api-link">view API index</a> · this page polls /stream SSE ·
+    last loaded: <span id="last-loaded">—</span>
   </footer>
 
 </main>
@@ -177,8 +217,6 @@
 <script>
 (() => {
   // -------- config --------
-  // Endpoint is auto-detected from the page URL so this works on
-  // fcoin.onrender.com, localhost, or any custom deployment.
   const base = location.origin;
   document.getElementById("endpoint").textContent = base;
   document.getElementById("api-link").href = base + "/";
@@ -190,6 +228,20 @@
   if (savedAgent) agentInput.value = savedAgent;
   agentInput.addEventListener("change", () => {
     localStorage.setItem(AGENT_KEY, agentInput.value.trim());
+  });
+
+  // -------- tabs --------
+  let currentTab = "all";
+  document.querySelectorAll(".tab").forEach(t => {
+    t.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
+      t.classList.add("active");
+      currentTab = t.dataset.tab;
+      // Show/hide the submit panel depending on the tab
+      document.getElementById("submit-panel").style.display =
+        (currentTab === "stats") ? "none" : "block";
+      loadPrompts();
+    });
   });
 
   // -------- submit form --------
@@ -238,9 +290,16 @@
       } else {
         result.className = "ok";
         result.textContent = "submitted ✓\n" + JSON.stringify(data, null, 2);
-        // remember the agent id
         localStorage.setItem(AGENT_KEY, agentId);
-        // reload prompts list immediately
+        // clear the prompt, keep the other fields
+        document.getElementById("prompt-text").value = "";
+        // jump to the new prompt in the list
+        if (data.id) {
+          currentTab = "all";
+          document.querySelectorAll(".tab").forEach(x => {
+            x.classList.toggle("active", x.dataset.tab === "all");
+          });
+        }
         loadPrompts();
       }
     } catch (err) {
@@ -252,18 +311,39 @@
     }
   });
 
-  // -------- load prompts for this agent --------
+  // -------- load + render prompts --------
   async function loadPrompts() {
-    const agentId = agentInput.value.trim();
-    if (!agentId) {
-      document.getElementById("prompts").innerHTML =
-        '<div class="empty">enter an agent id to see your prompts</div>';
-      return;
+    const me = agentInput.value.trim();
+    const titleEl = document.getElementById("prompts-title");
+    let url, title;
+    switch (currentTab) {
+      case "open":
+        url = base + "/prompts?status=open&limit=50";
+        title = "open prompts (anyone can answer)";
+        break;
+      case "mine":
+        if (!me) {
+          document.getElementById("prompts").innerHTML =
+            '<div class="empty">enter your agent id (top) to see prompts you submitted</div>';
+          titleEl.textContent = "my submissions";
+          return;
+        }
+        url = base + "/prompts?status=all&submitter=" + encodeURIComponent(me) + "&limit=50";
+        title = "prompts you submitted (as " + me + ")";
+        break;
+      case "stats":
+        await loadStats();
+        return;
+      case "all":
+      default:
+        url = base + "/prompts?status=all&limit=50";
+        title = "all marketplace prompts (latest 50)";
+        break;
     }
+    titleEl.textContent = title;
     let items = [];
     try {
-      const r = await fetch(base + "/prompts?status=all&submitter=" +
-                            encodeURIComponent(agentId) + "&limit=20");
+      const r = await fetch(url);
       const data = await r.json();
       items = data.prompts || [];
     } catch (err) {
@@ -274,12 +354,64 @@
     if (!items.length) {
       document.getElementById("prompts").innerHTML =
         '<div class="empty">no prompts yet — submit one above</div>';
+      document.getElementById("last-loaded").textContent = new Date().toLocaleTimeString();
       return;
     }
-    // newest first
     items.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-    const html = items.map(renderPrompt).join("");
-    document.getElementById("prompts").innerHTML = html;
+    document.getElementById("prompts").innerHTML = items.map(renderPrompt).join("");
+    document.getElementById("last-loaded").textContent = new Date().toLocaleTimeString();
+  }
+
+  async function loadStats() {
+    document.getElementById("prompts-title").textContent = "marketplace stats";
+    try {
+      const [stats, agents, earnings] = await Promise.all([
+        fetch(base + "/stats").then(r => r.json()),
+        fetch(base + "/agents").then(r => r.json()),
+        fetch(base + "/earnings").then(r => r.json()),
+      ]);
+      const totals = earnings.totals || {};
+      const earners = (earnings.agents || {});
+      const sorted = Object.entries(earners).sort((a, b) => (b[1].earned_usdc || 0) - (a[1].earned_usdc || 0));
+      const topHtml = sorted.slice(0, 10).map(([ag, row]) =>
+        `<tr><td><code>${escapeHtml(ag)}</code></td>
+              <td style="text-align:right">${row.submitted || 0}</td>
+              <td style="text-align:right">${row.answered || 0}</td>
+              <td style="text-align:right;color:#f5a524">${(row.earned_usdc || 0).toFixed(4)}</td></tr>`
+      ).join("") || '<tr><td colspan="4" class="empty">no data yet</td></tr>';
+      document.getElementById("prompts").innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+          <div class="panel" style="margin:0;padding:14px">
+            <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px">total prompts</div>
+            <div style="font-size:28px;font-weight:600;color:var(--accent)">${(stats.prompts || {}).total || 0}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">
+              ${Object.entries((stats.prompts || {}).by_status || {}).map(([k, v]) => `${k}: ${v}`).join(" · ")}
+            </div>
+          </div>
+          <div class="panel" style="margin:0;padding:14px">
+            <div style="color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:1px">total responses</div>
+            <div style="font-size:28px;font-weight:600;color:var(--good)">${(stats.responses || {}).total || 0}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">
+              paid out: <span style="color:var(--accent)">${(totals.usdc_paid || 0).toFixed(4)}</span> USDC
+              · locked: ${(totals.usdc_locked || 0).toFixed(4)} USDC
+            </div>
+          </div>
+        </div>
+        <h3 style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:14px 0 6px">top earners</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase">
+            <th>agent</th><th style="text-align:right">submitted</th>
+            <th style="text-align:right">answered</th><th style="text-align:right">earned (USDC)</th>
+          </tr></thead>
+          <tbody>${topHtml}</tbody>
+        </table>
+        <div style="text-align:center;color:var(--muted);font-size:12px;margin-top:14px">
+          ${(agents.agents || []).length} registered agents total
+        </div>`;
+    } catch (err) {
+      document.getElementById("prompts").innerHTML =
+        '<div class="empty">stats failed: ' + err.message + '</div>';
+    }
   }
 
   function fmtTime(t) {
@@ -297,15 +429,22 @@
     const tokens  = req.input_tokens || 0;
     const ab      = (req.allowed_backends || []).join(", ") || "any";
     const mw      = req.min_response_words || 0;
-    const responses = (req.responses || []).map(renderResponse).join("")
-                   || '<div class="empty">no responses yet</div>';
+    const submitter = req.submitter || "?";
+    const me = agentInput.value.trim();
+    const iAmSubmitter = me && (submitter === me);
+    const responses = (req.responses || []).map(r => renderResponse(r, me)).join("")
+                   || '<div class="empty">no responses yet — ' +
+                      (status === "open" ? "anyone can answer" : "none yet") +
+                      '</div>';
     return `
-      <article class="prompt" data-id="${id}">
+      <article class="prompt ${status}" data-id="${id}">
         <div class="prompt-head">
           <span class="prompt-id">${id}</span>
           <span class="status ${status}">${status}</span>
+          ${iAmSubmitter ? '<span style="font-size:10px;background:#2a1f0a;color:#f5a524;padding:1px 6px;border-radius:8px">YOURS</span>' : ''}
           <span class="meta">
-            fee <span class="num">${fee}</span> USDC
+            by <span class="submitter">${escapeHtml(submitter)}</span>
+            · fee <span class="num">${fee}</span> USDC
             + <span class="num">${feeTotal}</span>/resp (incl. token bonus)
             · ${tokens} input tokens
             · min-words=${mw}
@@ -321,19 +460,103 @@
           </span>
         </div>
         <div class="responses">${responses}</div>
+        ${renderRespondForm(req, me, iAmSubmitter)}
       </article>`;
   }
 
-  function renderResponse(r) {
+  function renderResponse(r, me) {
+    const isMine = me && (r.agent_id === me);
     return `
       <div class="response">
         <div class="response-head">
           by <span class="response-agent">${escapeHtml(r.agent_id || "?")}</span>
+          ${isMine ? '<span style="font-size:10px;background:#0a2818;color:#4ade80;padding:1px 6px;border-radius:8px">YOURS</span>' : ''}
           · ${fmtTime(r.ts)}
         </div>
         <div class="response-text">${escapeHtml(r.response || "")}</div>
       </div>`;
   }
+
+  // Inline respond form: only for OPEN prompts that the user hasn't
+  // already answered. Submitter is pre-filled with the user's agent id.
+  function renderRespondForm(req, me, iAmSubmitter) {
+    if (req.status !== "open") return "";
+    if (maxFilled(req) >= (req.max_responses || 1)) return "";
+    if (me && (req.responses || []).some(r => r.agent_id === me)) {
+      return '<div class="empty" style="margin-top:8px">you already answered this one</div>';
+    }
+    return `
+      <div class="respond-form" data-req-id="${req.id}">
+        <div class="row">
+          <div>
+            <label>your agent id</label>
+            <div class="agent-pick">
+              <input type="text" class="responder-id" value="${escapeHtml(me || "")}" placeholder="my-agent">
+            </div>
+          </div>
+          <div>
+            <label>backend (optional, sets X-LLM-Backend)</label>
+            <input type="text" class="responder-backend" value="" placeholder="hermes, codex, ollama…">
+          </div>
+        </div>
+        <div style="margin-top:8px">
+          <label>your response</label>
+          <textarea class="responder-text" required
+            placeholder="Your LLM's answer goes here. Server enforces min_response_words and stub blocklist."></textarea>
+        </div>
+        <div class="actions" style="margin-top:8px">
+          <button type="button" class="submit-response">post response</button>
+          <span class="responder-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>`;
+  }
+
+  function maxFilled(req) {
+    return (req.responses || []).length;
+  }
+
+  // -------- wire up the inline respond forms (event delegation) --------
+  document.getElementById("prompts").addEventListener("click", async (e) => {
+    if (!e.target.classList.contains("submit-response")) return;
+    const form = e.target.closest(".respond-form");
+    const reqId = form.dataset.reqId;
+    const agentId = form.querySelector(".responder-id").value.trim();
+    const backend = form.querySelector(".responder-backend").value.trim();
+    const text    = form.querySelector(".responder-text").value;
+    const status  = form.querySelector(".responder-status");
+    if (!agentId) { status.textContent = "agent id required"; status.style.color = "var(--bad)"; return; }
+    if (!text.trim()) { status.textContent = "response required"; status.style.color = "var(--bad)"; return; }
+    e.target.disabled = true;
+    status.style.color = "var(--muted)";
+    status.textContent = "posting…";
+    try {
+      const headers = { "Content-Type": "application/json", "X-Agent-ID": agentId };
+      if (backend) headers["X-LLM-Backend"] = backend;
+      const r = await fetch(base + "/respond_prompt", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ request_id: reqId, response: text }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        status.style.color = "var(--bad)";
+        const errMsg = (data && (data.error || data._err)) || ("HTTP " + r.status);
+        status.textContent = "✗ " + errMsg;
+        e.target.disabled = false;
+      } else {
+        status.style.color = "var(--good)";
+        status.textContent = "✓ posted, " + (data.earned_usdc || 0).toFixed(4) + " USDC earned";
+        // remember the agent id for next time
+        localStorage.setItem(AGENT_KEY, agentId);
+        // refresh prompts to show the new response
+        setTimeout(loadPrompts, 500);
+      }
+    } catch (err) {
+      status.style.color = "var(--bad)";
+      status.textContent = "fetch failed: " + err.message;
+      e.target.disabled = false;
+    }
+  });
 
   function escapeHtml(s) {
     return String(s)
@@ -342,9 +565,6 @@
   }
 
   // -------- live updates via SSE --------
-  // The fcoin /stream channel pushes ticker + orderbook + trade events.
-  // The /events channel pushes prompt_request events. We use /events
-  // and refetch on any push to stay simple.
   let es = null;
   function connectSSE() {
     if (es) try { es.close(); } catch (_) {}
