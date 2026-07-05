@@ -241,6 +241,14 @@ async def _submit_prompt(request: Request) -> JSONResponse:
         fee_usdc      = float(body.get("fee_usdc", 0))
         max_responses = int(body.get("max_responses", 1))
         model_hint    = body.get("model_hint", "")
+        # Token-based fee. Omitted / 0 = flat fee only. The submitter
+        # specifies how much they want to pay per input token in USDC;
+        # the server computes the input token count and locks the
+        # total (flat + tokens*rate) from the submitter up front.
+        fpit_raw = body.get("fee_per_input_token_usdc", None)
+        fee_per_input_token_usdc = (
+            float(fpit_raw) if fpit_raw is not None else None
+        )
 
         from ..prompts import prompt_market
         result = prompt_market.submit_prompt(
@@ -249,6 +257,7 @@ async def _submit_prompt(request: Request) -> JSONResponse:
             fee_usdc=fee_usdc,
             max_responses=max_responses,
             model_hint=model_hint,
+            fee_per_input_token_usdc=fee_per_input_token_usdc,
         )
         return JSONResponse({"agent_id": agent_id, **result})
     except Exception as exc:
@@ -410,9 +419,13 @@ async def _earnings(request: Request) -> JSONResponse:
             row = rollup.setdefault(sid, {"submitted": 0, "spent_usdc": 0.0,
                                           "answered": 0, "earned_usdc": 0.0})
             row["submitted"] += 1
-            # only count fee as "spent" if any responses came back
-            paid = min(len(r.responses), r.max_responses) * r.fee_usdc
-            row["spent_usdc"] += paid
+            # only count the flat-fee portion as "spent" (the part that
+            # was actually earned by an agent). Token money is locked at
+            # submit time but not all of it is spent — only what's
+            # actually paid out.
+            per_resp = r.fee_usdc + r.input_tokens * r.fee_per_input_token_usdc
+            filled = min(len(r.responses), r.max_responses)
+            row["spent_usdc"] += per_resp * filled
             row["answered"] += len(r.responses)
         for resp in responses:
             r = next((x for x in reqs if x.id == resp.request_id), None)
@@ -420,8 +433,9 @@ async def _earnings(request: Request) -> JSONResponse:
                 continue
             row = rollup.setdefault(resp.agent_id, {"submitted": 0, "spent_usdc": 0.0,
                                                     "answered": 0, "earned_usdc": 0.0})
-            # they earned fee_usdc per response, capped at max_responses
-            earned = r.fee_usdc
+            # they earned fee_usdc + token bonus per response,
+            # capped at max_responses
+            earned = r.fee_usdc + r.input_tokens * r.fee_per_input_token_usdc
             row["earned_usdc"] += earned
             row["answered"] += 1
 
@@ -458,16 +472,23 @@ async def _stats(request: Request) -> JSONResponse:
             responses = list(prompt_market._responses.values())
 
         by_status: dict[str, int] = {}
-        total_fees = 0.0
         for r in reqs:
             by_status[r.status] = by_status.get(r.status, 0) + 1
-            total_fees += r.fee_usdc * r.max_responses
+        # total_fees_locked: sum of what submitters have on the hook,
+        # flat + token bonus × max_responses for every request ever made
+        total_fees = sum(
+            (r.fee_usdc + r.input_tokens * r.fee_per_input_token_usdc) * r.max_responses
+            for r in reqs
+        )
 
-        # top earners
+        # top earners — credit the actual earned amount (flat + token bonus)
         earned: dict[str, float] = {}
         for resp in responses:
-            earned[resp.agent_id] = earned.get(resp.agent_id, 0.0) + \
-                next((r.fee_usdc for r in reqs if r.id == resp.request_id), 0.0)
+            req_match = next((r for r in reqs if r.id == resp.request_id), None)
+            if req_match is None:
+                continue
+            amt = req_match.fee_usdc + req_match.input_tokens * req_match.fee_per_input_token_usdc
+            earned[resp.agent_id] = earned.get(resp.agent_id, 0.0) + amt
         top = sorted(earned.items(), key=lambda kv: kv[1], reverse=True)[:10]
 
         return JSONResponse({

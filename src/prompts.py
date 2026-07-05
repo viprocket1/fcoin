@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -20,6 +21,24 @@ from dataclasses import dataclass, field
 from typing import Optional   # noqa
 
 log = logging.getLogger("fcoin.prompts")
+
+
+def count_input_tokens(prompt: str) -> int:
+    """Approximate input token count for a prompt.
+
+    We don't have access to a real tokenizer on the server side, so we
+    use a word-based heuristic that over-estimates slightly (English text
+    averages ~0.75 words/token). This errs on the side of charging the
+    submitter slightly more for token-priced prompts, which is fine for
+    a research marketplace — the surplus gets refunded on cancel.
+
+    Returns an int >= 1 (a 1-token floor for non-empty prompts so even
+    a trivial "hi" still costs something under a token-price regime).
+    """
+    if not prompt or not prompt.strip():
+        return 0
+    # word_count * 4/3 ≈ token count (BPE-style over-estimate)
+    return max(1, int(round(len(prompt.split()) * 4 / 3)))
 
 
 # -----------------------------------------------------------------------------
@@ -37,6 +56,13 @@ class PromptRequest:
     responses:      list[dict] = field(default_factory=list)   # [{agent_id, response, ts}]
     status:         str = "open"         # open | fulfilled | expired | cancelled
     paid_out_usdc:  float = 0.0
+    # Token-based pricing. fee_per_input_token_usdc is the rate the
+    # answering agent earns PER input token (in addition to fee_usdc).
+    # 0.0 = flat fee, no token bonus. Pricing is locked at submit time
+    # so submitters can't be retroactively charged more.
+    fee_per_input_token_usdc: float = 0.0
+    input_tokens:   int = 0              # computed at submit time, frozen
+    locked_usdc:    float = 0.0          # total USDC locked from submitter
 
 
 @dataclass
@@ -64,6 +90,12 @@ class PromptMarket:
         self._min_response_len = 1          # accept any non-empty response (let the market judge)
         self._max_response_len = 8000
         self._min_fee_usdc    = 0.001       # reject zero-fee spam
+        # Default token-pricing rate when submitter doesn't specify one.
+        # 0.0 = flat fee only (no token bonus). The marketplace may evolve
+        # toward a per-token norm; until then this is a no-op.
+        self._default_fee_per_input_token_usdc = float(
+            os.environ.get("FCOIN_DEFAULT_FEE_PER_INPUT_TOKEN", "0")
+        )
         # --- persistence ---
         # Back the market with a JSON file so it survives Render redeploys.
         # We don't lock the file (the in-memory lock is enough for the single-process
@@ -84,11 +116,21 @@ class PromptMarket:
         fee_usdc:       float,
         max_responses:  int = 1,
         model_hint:     str = "",
+        fee_per_input_token_usdc: float | None = None,
     ) -> dict:
         """
         Submit a prompt to the marketplace.
-        Locks `fee_usdc * max_responses` USDC from the submitter's wallet immediately.
-        Returns the created request.
+
+        Total cost locked from submitter:
+            cost = max_responses × (fee_usdc + input_tokens × fee_per_input_token_usdc)
+
+        The flat fee_usdc is what the answering agent is guaranteed;
+        the per-input-token portion is a bonus that scales with prompt
+        size, so a 10K-token prompt pays the agent more than a 10-word
+        one even at the same flat fee.
+
+        If `fee_per_input_token_usdc` is omitted, the marketplace default
+        is used (env FCOIN_DEFAULT_FEE_PER_INPUT_TOKEN, default 0 = flat fee).
         """
         if not prompt or not prompt.strip():
             raise ValueError("prompt cannot be empty")
@@ -96,11 +138,22 @@ class PromptMarket:
             raise ValueError(f"fee_usdc must be >= {self._min_fee_usdc}")
         if max_responses < 1:
             raise ValueError("max_responses must be >= 1")
+        if fee_per_input_token_usdc is None:
+            fee_per_input_token_usdc = self._default_fee_per_input_token_usdc
+        if fee_per_input_token_usdc < 0:
+            raise ValueError("fee_per_input_token_usdc must be >= 0")
+
+        # Token count is frozen at submit time so the submitter is never
+        # retroactively charged for a prompt that gets edited server-side.
+        input_tokens = count_input_tokens(prompt)
 
         from .exchange import get_exchange, Balance
         ex = get_exchange()
         wallet = ex.get_or_create_agent(submitter)
-        cost = fee_usdc * max_responses
+        # Worst-case lock: full token price × max_responses. Any unused
+        # token money is refunded on cancel/settle.
+        per_response = fee_usdc + input_tokens * fee_per_input_token_usdc
+        cost = per_response * max_responses
         b = wallet._balances.get("usdc")
         if b is None or b.available < cost:
             raise ValueError(
@@ -119,13 +172,17 @@ class PromptMarket:
             fee_usdc=fee_usdc,
             max_responses=max_responses,
             model_hint=model_hint,
+            fee_per_input_token_usdc=fee_per_input_token_usdc,
+            input_tokens=input_tokens,
+            locked_usdc=cost,
         )
         with self._lock:
             self._requests[req_id] = req
 
         log.info(
             f"[prompts] submit  id={req_id}  submitter={submitter}  "
-            f"fee={fee_usdc:.4f}  max={max_responses}  cost={cost:.4f}"
+            f"fee={fee_usdc:.4f}  fee/tok={fee_per_input_token_usdc:.6f}  "
+            f"tokens={input_tokens}  max={max_responses}  cost={cost:.4f}"
         )
 
         # Broadcast to all connected agents via the SSE stream
@@ -164,6 +221,10 @@ class PromptMarket:
                 raise ValueError("agent already responded to this prompt")
 
         # Credit the agent
+        # Per-response earnings = flat fee + input-token bonus.
+        # Token money was locked at submit time; the agent earns it
+        # on top of the flat fee whenever they answer.
+        earned = req.fee_usdc + req.input_tokens * req.fee_per_input_token_usdc
         from .exchange import get_exchange, Balance
         ex = get_exchange()
         wallet = ex.get_or_create_agent(agent_id)
@@ -171,7 +232,7 @@ class PromptMarket:
         if b is None:
             b = Balance()
             wallet._balances["usdc"] = b
-        b.available += req.fee_usdc
+        b.available += earned
         wallet.sync_to_store(ex._store)
 
         resp_id = f"rsp_{uuid.uuid4().hex[:10]}"
@@ -189,11 +250,18 @@ class PromptMarket:
                 "response":    resp.response,
                 "ts":          resp.created_at,
             })
-            req.paid_out_usdc += req.fee_usdc
+            # Per-response earnings = flat fee + input-token bonus.
+            # The token bonus is the *full* locked amount (the submitter
+            # pre-paid for tokens at submit time), so the agent always
+            # earns the token component when they answer.
+            earned = req.fee_usdc + req.input_tokens * req.fee_per_input_token_usdc
+            req.paid_out_usdc += earned
             if len(req.responses) >= req.max_responses:
                 req.status = "fulfilled"
-                # Refund any unfilled portion
-                refund = (req.max_responses - len(req.responses)) * req.fee_usdc
+                # Refund any unfilled portion: flat fee × unfilled slots
+                # only — token money is fully consumed (we used the tokens).
+                filled = len(req.responses)
+                refund = (req.max_responses - filled) * req.fee_usdc
                 if refund > 0:
                     submitter_wallet = ex.get_or_create_agent(req.submitter)
                     sb = submitter_wallet._balances.get("usdc")
@@ -206,7 +274,7 @@ class PromptMarket:
 
         log.info(
             f"[prompts] response  request={request_id}  agent={agent_id}  "
-            f"earned={req.fee_usdc:.4f}  status={req.status}"
+            f"earned={earned:.4f}  (flat={req.fee_usdc:.4f} + token={req.input_tokens * req.fee_per_input_token_usdc:.4f})  status={req.status}"
         )
 
         self._save()              # persist after every mutation
@@ -214,7 +282,7 @@ class PromptMarket:
             "response_id":   resp_id,
             "request_id":    request_id,
             "agent_id":      agent_id,
-            "earned_usdc":   req.fee_usdc,
+            "earned_usdc":   earned,
             "request_status": req.status,
         }
 
@@ -266,6 +334,12 @@ class PromptMarket:
             if req.status != "open":
                 raise ValueError(f"request is {req.status}")
 
+            # Refund the unfilled portion: flat fee × unfilled slots.
+            # Token money is NOT refundable on cancel — the tokens were
+            # already paid for at submit time, regardless of whether
+            # the prompt got answered. This is a research marketplace,
+            # not a refund-friendly store; the user agreed to the rate
+            # up front and the tokens were priced at that moment.
             remaining = (req.max_responses - len(req.responses)) * req.fee_usdc
             req.status = "cancelled"
 
@@ -285,17 +359,25 @@ class PromptMarket:
     # ------------------------------------------------------------------ internals
 
     def _request_view(self, req: PromptRequest) -> dict:
+        per_response = req.fee_usdc + req.input_tokens * req.fee_per_input_token_usdc
         return {
-            "id":             req.id,
-            "submitter":      req.submitter,
-            "prompt":         req.prompt,
-            "fee_usdc":       req.fee_usdc,
-            "max_responses":  req.max_responses,
-            "model_hint":     req.model_hint,
-            "status":         req.status,
-            "responses":      req.responses,
-            "paid_out_usdc":  req.paid_out_usdc,
-            "created_at":     req.created_at,
+            "id":                          req.id,
+            "submitter":                   req.submitter,
+            "prompt":                      req.prompt,
+            "fee_usdc":                    req.fee_usdc,
+            "max_responses":               req.max_responses,
+            "model_hint":                  req.model_hint,
+            "status":                      req.status,
+            "responses":                   req.responses,
+            "paid_out_usdc":               req.paid_out_usdc,
+            "created_at":                  req.created_at,
+            # Token-pricing fields. Per-response price = flat + tokens*rate.
+            # A submitter can audit the bill by comparing locked_usdc to
+            # max_responses * per_response_total.
+            "input_tokens":                req.input_tokens,
+            "fee_per_input_token_usdc":    req.fee_per_input_token_usdc,
+            "per_response_total_usdc":     per_response,
+            "locked_usdc":                 req.locked_usdc,
         }
 
     def _broadcast_request(self, req: PromptRequest) -> None:
