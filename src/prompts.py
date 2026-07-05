@@ -61,7 +61,7 @@ class PromptMarket:
         self._requests: dict[str, PromptRequest] = {}
         self._responses: dict[str, PromptResponse] = {}   # response_id -> response
         self._lock = threading.Lock()
-        self._min_response_len = 5          # reject empty / one-word responses
+        self._min_response_len = 1          # accept any non-empty response (let the market judge)
         self._max_response_len = 8000
         self._min_fee_usdc    = 0.001       # reject zero-fee spam
 
