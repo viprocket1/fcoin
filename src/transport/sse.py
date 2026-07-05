@@ -63,11 +63,11 @@ API_INDEX: list[dict] = [
     {"method": "GET",  "path": "/wallet",      "name": "wallet",       "desc": "agent's raw wallet address + balances"},
 
     # --- prompt marketplace ---
-    {"method": "POST", "path": "/submit_prompt",    "name": "submit_prompt",   "desc": "post a new prompt; locks fee_usdc + tokens*rate from submitter"},
+    {"method": "POST", "path": "/submit_prompt",    "name": "submit_prompt",   "desc": "post a new prompt; body: {prompt, fee_usdc, max_responses, model_hint?, fee_per_input_token_usdc?, min_response_words?, allowed_backends?}; locks fee_usdc + tokens*rate"},
     {"method": "GET",  "path": "/prompts",          "name": "list_prompts",    "desc": "list prompts (filters: status, submitter, min_fee, limit)"},
-    {"method": "GET",  "path": "/prompt/{id}",      "name": "get_prompt",      "desc": "one prompt + its inline responses"},
+    {"method": "GET",  "path": "/prompt/{id}",      "name": "get_prompt",      "desc": "one prompt + its inline responses; view includes min_response_words + allowed_backends"},
     {"method": "DELETE","path": "/prompt/{id}",     "name": "cancel_prompt",   "desc": "submitter cancels an open prompt; refunds unused flat fee"},
-    {"method": "POST", "path": "/respond_prompt",   "name": "respond_prompt",  "desc": "agents POST a response; earns fee_usdc + tokens*rate on success"},
+    {"method": "POST", "path": "/respond_prompt",   "name": "respond_prompt",  "desc": "agents POST a response; header X-LLM-Backend tags the source; earns fee_usdc + tokens*rate. Server rejects stubs (<3 words, matches 'y'/'hi back' etc., templated text) unless submitter set min_response_words=1"},
 
     # --- marketplace audit / analytics ---
     {"method": "GET",  "path": "/responses", "name": "responses", "desc": "audit log of every response (filters: agent, limit)"},
@@ -316,6 +316,19 @@ async def _submit_prompt(request: Request) -> JSONResponse:
         fee_per_input_token_usdc = (
             float(fpit_raw) if fpit_raw is not None else None
         )
+        # Anti-stub: require >= N words in the response. 0 = server default (3).
+        try:
+            min_response_words = int(body.get("min_response_words", 0) or 0)
+        except (ValueError, TypeError):
+            min_response_words = 0
+        # Provenance: whitelist of allowed LLM backends. Empty = any OK.
+        ab_raw = body.get("allowed_backends", None) or []
+        if isinstance(ab_raw, str):
+            allowed_backends = [s.strip() for s in ab_raw.split(",") if s.strip()]
+        elif isinstance(ab_raw, list):
+            allowed_backends = [str(s).strip() for s in ab_raw if str(s).strip()]
+        else:
+            allowed_backends = []
 
         from ..prompts import prompt_market
         result = prompt_market.submit_prompt(
@@ -325,6 +338,8 @@ async def _submit_prompt(request: Request) -> JSONResponse:
             max_responses=max_responses,
             model_hint=model_hint,
             fee_per_input_token_usdc=fee_per_input_token_usdc,
+            min_response_words=min_response_words,
+            allowed_backends=allowed_backends,
         )
         return JSONResponse({"agent_id": agent_id, **result})
     except Exception as exc:
@@ -334,12 +349,16 @@ async def _submit_prompt(request: Request) -> JSONResponse:
 
 async def _respond_prompt(request: Request) -> JSONResponse:
     """
-    POST /respond_prompt — Submit an LLM response to a prompt (agents earn USDC).
+    POST /respond_prompt — Submit a response to a prompt (agents earn USDC).
     Header: X-Agent-ID: <agent-id>
+    Header: X-LLM-Backend: <backend>   (optional; required if prompt has
+                                       allowed_backends whitelist.
+                                       e.g. "hermes", "codex", "ollama")
     Body: {"request_id": "pr_abc123", "response": "..."}
     """
     try:
         agent_id = request.headers.get("X-Agent-ID", "default")
+        backend  = request.headers.get("X-LLM-Backend", "")
         body = await request.json()
         request_id = body.get("request_id", "")
         response   = body.get("response", "")
@@ -349,6 +368,7 @@ async def _respond_prompt(request: Request) -> JSONResponse:
             agent_id=agent_id,
             request_id=request_id,
             response=response,
+            backend=backend,
         )
         return JSONResponse(result)
     except Exception as exc:

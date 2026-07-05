@@ -63,6 +63,12 @@ class PromptRequest:
     fee_per_input_token_usdc: float = 0.0
     input_tokens:   int = 0              # computed at submit time, frozen
     locked_usdc:    float = 0.0          # total USDC locked from submitter
+    # Anti-stub: the submitter can require a minimum number of words
+    # in the response (default 3). Higher = higher-effort answers only.
+    min_response_words: int = 0          # 0 = use server default
+    # Provenance: the submitter can whitelist which LLM backends may
+    # answer. Empty list = any backend OK. e.g. ["hermes","codex","ollama"]
+    allowed_backends: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -87,9 +93,20 @@ class PromptMarket:
         self._requests: dict[str, PromptRequest] = {}
         self._responses: dict[str, PromptResponse] = {}   # response_id -> response
         self._lock = threading.Lock()
-        self._min_response_len = 1          # accept any non-empty response (let the market judge)
-        self._max_response_len = 8000
-        self._min_fee_usdc    = 0.001       # reject zero-fee spam
+        # Server-wide floors. Per-prompt overrides live on PromptRequest.
+        self._min_response_len   = 1     # chars (fallback if submitter didn't set)
+        self._min_response_words = 3     # words (anti-stub floor)
+        self._max_response_len   = 8000
+        self._min_fee_usdc       = 0.001
+        # Strings that count as "stub" responses — automatic reject. These
+        # are the obvious lazy patterns: "y", "hi back", single chars, etc.
+        # Submitters can also define their own via env or a future /config
+        # endpoint.  Case-insensitive match after stripping whitespace.
+        self._stub_patterns: set[str] = {
+            "y", "yes", "no", "ok", "k", "n",
+            "hi", "hi back", "hey", "hello", "yo",
+            "h", "w", "t", "f", "thx", "thanks", "ty",
+        }
         # Default token-pricing rate when submitter doesn't specify one.
         # 0.0 = flat fee only (no token bonus). The marketplace may evolve
         # toward a per-token norm; until then this is a no-op.
@@ -117,6 +134,8 @@ class PromptMarket:
         max_responses:  int = 1,
         model_hint:     str = "",
         fee_per_input_token_usdc: float | None = None,
+        min_response_words: int = 0,
+        allowed_backends: list[str] | None = None,
     ) -> dict:
         """
         Submit a prompt to the marketplace.
@@ -175,6 +194,8 @@ class PromptMarket:
             fee_per_input_token_usdc=fee_per_input_token_usdc,
             input_tokens=input_tokens,
             locked_usdc=cost,
+            min_response_words=min_response_words,
+            allowed_backends=list(allowed_backends or []),
         )
         with self._lock:
             self._requests[req_id] = req
@@ -197,13 +218,23 @@ class PromptMarket:
         agent_id:       str,
         request_id:     str,
         response:       str,
+        backend:        str = "",         # provenance tag (e.g. "hermes", "codex")
     ) -> dict:
         """
-        Agent submits an LLM-generated response to a prompt.
+        Agent submits a response to a prompt.
         Credits `fee_usdc` to the agent if the response is accepted.
         Returns the response record.
+
+        Validation (any of these raises ValueError):
+          - response empty or below min_response_words
+          - response exceeds _max_response_len chars
+          - response matches a known stub pattern ("y", "hi back", "yes", ...)
+          - response has too-low lexical diversity ("yes yes yes yes")
+          - backend is not in the prompt's allowed_backends whitelist
         """
-        if not response or len(response.strip()) < self._min_response_len:
+        if not response or not response.strip():
+            raise ValueError("response cannot be empty")
+        if len(response.strip()) < self._min_response_len:
             raise ValueError(f"response too short (min {self._min_response_len} chars)")
         if len(response) > self._max_response_len:
             raise ValueError(f"response too long (max {self._max_response_len} chars)")
@@ -211,14 +242,48 @@ class PromptMarket:
         with self._lock:
             req = self._requests.get(request_id)
             if req is None:
-                raise ValueError(f"unknown request_id: {request_id}")
-            if req.status != "open":
-                raise ValueError(f"request is {req.status}")
+                raise ValueError("unknown request_id")
+            if req.status == "cancelled":
+                raise ValueError("request was cancelled")
+            if req.status == "fulfilled":
+                raise ValueError("request already fulfilled")
             if len(req.responses) >= req.max_responses:
                 raise ValueError("request already fulfilled")
-            # Prevent same agent answering twice
             if any(r["agent_id"] == agent_id for r in req.responses):
                 raise ValueError("agent already responded to this prompt")
+            # Per-prompt backend whitelist (provenance)
+            if req.allowed_backends:
+                if not backend:
+                    raise ValueError(
+                        f"prompt requires one of: {req.allowed_backends} (no backend tag sent)"
+                    )
+                if backend not in req.allowed_backends:
+                    raise ValueError(
+                        f"backend {backend!r} not in prompt's allowed list {req.allowed_backends}"
+                    )
+            # Per-prompt minimum word count
+            min_words = req.min_response_words or self._min_response_words
+            word_count = len(response.split())
+            if word_count < min_words:
+                raise ValueError(
+                    f"response too short (got {word_count} words, need >= {min_words})"
+                )
+            # Stub-pattern check (case-insensitive whole-string match)
+            stripped = response.strip().lower()
+            if stripped in self._stub_patterns:
+                raise ValueError(
+                    f"response matches a stub pattern ({stripped!r}); submit a real answer"
+                )
+            # Lexical-diversity check: if <40% of words are unique, it's
+            # likely a copy-paste of the same word.
+            words = stripped.split()
+            if words:
+                unique_ratio = len(set(words)) / len(words)
+                if len(words) >= 5 and unique_ratio < 0.4:
+                    raise ValueError(
+                        f"response has too-low lexical diversity "
+                        f"({unique_ratio:.0%} unique words); looks templated"
+                    )
 
         # Credit the agent
         # Per-response earnings = flat fee + input-token bonus.
@@ -372,12 +437,13 @@ class PromptMarket:
             "paid_out_usdc":               req.paid_out_usdc,
             "created_at":                  req.created_at,
             # Token-pricing fields. Per-response price = flat + tokens*rate.
-            # A submitter can audit the bill by comparing locked_usdc to
-            # max_responses * per_response_total.
             "input_tokens":                req.input_tokens,
             "fee_per_input_token_usdc":    req.fee_per_input_token_usdc,
             "per_response_total_usdc":     per_response,
             "locked_usdc":                 req.locked_usdc,
+            # Anti-stub + provenance.
+            "min_response_words":          req.min_response_words or self._min_response_words,
+            "allowed_backends":            req.allowed_backends,
         }
 
     def _broadcast_request(self, req: PromptRequest) -> None:
