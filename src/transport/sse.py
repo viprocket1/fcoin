@@ -59,6 +59,60 @@ async def _dashboard_jp(request: Request) -> FileResponse:
     return FileResponse(os.path.join(here, "dashboard_jp.html"))
 
 
+async def _dashboard_ko(request: Request) -> FileResponse:
+    """GET /dashboard/ko — Korean-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_ko.html"))
+
+
+async def _dashboard_zh(request: Request) -> FileResponse:
+    """GET /dashboard/zh — Simplified Chinese-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_zh.html"))
+
+
+async def _dashboard_es(request: Request) -> FileResponse:
+    """GET /dashboard/es — Spanish-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_es.html"))
+
+
+async def _dashboard_de(request: Request) -> FileResponse:
+    """GET /dashboard/de — German-style (Bauhaus) prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_de.html"))
+
+
+async def _dashboard_fr(request: Request) -> FileResponse:
+    """GET /dashboard/fr — French-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_fr.html"))
+
+
+async def _dashboard_ar(request: Request) -> FileResponse:
+    """GET /dashboard/ar — Arabic RTL-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_ar.html"))
+
+
+async def _dashboard_pt(request: Request) -> FileResponse:
+    """GET /dashboard/pt — Portuguese-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_pt.html"))
+
+
+async def _dashboard_ru(request: Request) -> FileResponse:
+    """GET /dashboard/ru — Russian-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_ru.html"))
+
+
+async def _dashboard_hi(request: Request) -> FileResponse:
+    """GET /dashboard/hi — Hindi-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_hi.html"))
+
+
 # Registry of every API endpoint with a one-line description. Used by
 # GET / to render a navigable index. The list mirrors the routes
 # registered in run_sse() — keep them in sync when adding new routes.
@@ -67,6 +121,14 @@ API_INDEX: list[dict] = [
     {"method": "GET",  "path": "/",            "name": "index",        "desc": "this page: every API endpoint with descriptions"},
     {"method": "GET",  "path": "/dashboard",  "name": "dashboard",    "desc": "single-page HTML UI: submit prompts, watch responses live"},
     {"method": "GET",  "path": "/dashboard/jp","name": "dashboard_jp", "desc": "Japanese-style variant of the dashboard"},
+    {"method": "GET",  "path": "/dashboard/pt","name": "dashboard_pt", "desc": "Portuguese-style prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/hi","name": "dashboard_hi", "desc": "Hindi-style prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/ko","name": "dashboard_ko", "desc": "Korean-style prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/zh","name": "dashboard_zh", "desc": "Simplified Chinese-style prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/de","name": "dashboard_de", "desc": "German-style prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/fr","name": "dashboard_fr", "desc": "French-style prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/ar","name": "dashboard_ar", "desc": "Arabic-style RTL prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/es","name": "dashboard_es", "desc": "Spanish-style prompt stream UI"},
     {"method": "GET",  "path": "/health",      "name": "health",       "desc": "liveness check for Render / load balancers"},
 
     # --- market data ---
@@ -752,6 +814,14 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/", _index, methods=["GET"])
     app.add_route("/dashboard", _dashboard, methods=["GET"])
     app.add_route("/dashboard/jp", _dashboard_jp, methods=["GET"])
+    app.add_route("/dashboard/hi", _dashboard_hi, methods=["GET"])
+    app.add_route("/dashboard/zh", _dashboard_zh, methods=["GET"])
+    app.add_route("/dashboard/ko", _dashboard_ko, methods=["GET"])
+    app.add_route("/dashboard/de", _dashboard_de, methods=["GET"])
+    app.add_route("/dashboard/fr", _dashboard_fr, methods=["GET"])
+    app.add_route("/dashboard/ar", _dashboard_ar, methods=["GET"])
+    app.add_route("/dashboard/pt", _dashboard_pt, methods=["GET"])
+    app.add_route("/dashboard/es", _dashboard_es, methods=["GET"])
     app.add_route("/health", _health, methods=["GET"])
     app.add_route("/ticker", _ticker, methods=["GET"])
     app.add_route("/portfolio", _portfolio, methods=["GET"])

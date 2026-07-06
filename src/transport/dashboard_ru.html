@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>符文 — fcoin Поток промтов</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --fg: #f5f5f0;
+    --muted: #8a8070;
+    --accent: #cc0000;
+    --gold: #d4a017;
+    --good: #4a7c3f;
+    --bad: #cc0000;
+    --paper: #141414;
+    --line: #333333;
+    --red: #cc0000;
+    --black: #1a1a1a;
+    --cream: #f5f5f0;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+               font: 14px/1.8 Arial, Helvetica, sans-serif; }
+
+  /* ── constructivist decorations ── */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 6px;
+    background: var(--accent);
+    z-index: 100;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    top: 6px; left: 0;
+    width: 6px; height: 6px;
+    background: var(--gold);
+    z-index: 100;
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+
+  /* ── header ── */
+  header {
+    margin-bottom: 36px;
+    border-bottom: 3px solid var(--accent);
+    padding-bottom: 20px;
+    position: relative;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -3px; right: 0;
+    width: 80px; height: 3px;
+    background: var(--gold);
+  }
+  header h1 {
+    font-family: Georgia, serif;
+    font-size: 42px; font-weight: 700; margin: 0;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  header .sub {
+    font-family: Georgia, serif;
+    font-size: 13px; color: var(--gold); margin-top: 4px;
+    font-style: italic;
+  }
+  .endpoint {
+    font-size: 11px; color: var(--muted);
+    font-family: monospace; margin-top: 8px;
+  }
+  .live-dot {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--accent);
+    margin-right: 6px; vertical-align: 2px;
+    border: 2px solid var(--gold);
+  }
+  .live-dot.on {
+    background: var(--good);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+  /* ── stats bar ── */
+  .stats {
+    display: flex; gap: 0; margin: 28px 0;
+    border: 2px solid var(--accent);
+    background: var(--paper);
+  }
+  .stat {
+    flex: 1; text-align: center; padding: 16px 8px;
+    border-right: 1px solid var(--line);
+  }
+  .stat:last-child { border-right: none; }
+  .stat-n {
+    font-family: Georgia, serif;
+    font-size: 26px; font-weight: 700;
+    color: var(--cream);
+  }
+  .stat-l {
+    font-size: 9px; color: var(--gold);
+    text-transform: uppercase; letter-spacing: 2px;
+    margin-top: 2px;
+  }
+
+  /* ── input ── */
+  .input-box {
+    background: var(--paper);
+    border: 2px solid var(--accent);
+    padding: 20px; margin-bottom: 14px;
+    position: relative;
+  }
+  .input-box::before {
+    content: '✷';
+    position: absolute;
+    top: -12px; left: 16px;
+    background: var(--bg); color: var(--gold);
+    font-size: 16px; padding: 0 4px;
+  }
+  .input-box label {
+    display: block;
+    font-size: 11px; color: var(--gold);
+    text-transform: uppercase; letter-spacing: 2px;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+  textarea {
+    width: 100%; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line);
+    padding: 14px; font: inherit; resize: vertical;
+    min-height: 100px; line-height: 1.7;
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--gold);
+  }
+  textarea::placeholder { color: #555555; }
+
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+  button {
+    background: var(--accent); color: var(--cream);
+    border: 2px solid var(--gold);
+    padding: 12px 28px; font: inherit; font-weight: 700;
+    cursor: pointer; font-size: 13px; letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  button:hover { background: #aa0000; }
+  button:disabled { opacity: 0.4; cursor: wait; }
+
+  .hint { font-size: 11px; color: var(--muted); }
+
+  #result {
+    margin-top: 12px; padding: 10px 14px;
+    font-family: monospace; font-size: 12px;
+    white-space: pre-wrap; word-break: break-all;
+    display: none;
+  }
+  #result.ok  {
+    display: block;
+    background: #0a1a0a; color: var(--good);
+    border-left: 3px solid var(--good);
+  }
+  #result.err {
+    display: block;
+    background: #1a0a0a; color: var(--bad);
+    border-left: 3px solid var(--bad);
+  }
+
+  /* ── feed ── */
+  .divider {
+    border: none; border-top: 2px solid var(--accent);
+    margin: 32px 0 20px;
+    position: relative;
+  }
+  .divider::after {
+    content: '⬡';
+    position: absolute;
+    top: -11px; left: 50%; transform: translateX(-50%);
+    background: var(--bg); color: var(--gold);
+    font-size: 14px; padding: 0 8px;
+  }
+  h2 {
+    font-family: Georgia, serif;
+    font-size: 11px; font-weight: 600; color: var(--gold);
+    text-transform: uppercase; letter-spacing: 3px;
+    margin: 0 0 18px;
+  }
+
+  #responses { display: grid; gap: 14px; }
+  .card {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--good);
+    padding: 14px 18px;
+  }
+  .card.pending { border-left-color: var(--accent); opacity: 0.8; }
+  .card.rejected { border-left-color: var(--bad); opacity: 0.7; }
+
+  .card-head {
+    display: flex; align-items: baseline; gap: 10px;
+    margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .card-id   { font-family: monospace; font-size: 11px; color: var(--muted); }
+  .card-agent{ font-family: monospace; font-size: 12px; color: var(--gold); font-weight: 700; }
+  .card-fee  { margin-left: auto; font-size: 12px; color: var(--good); font-weight: 700; }
+  .card-prompt {
+    font-size: 13px; color: #a09888; margin-bottom: 10px;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--bg); padding: 8px 12px;
+    border-left: 2px solid var(--accent);
+  }
+  .card-text  { white-space: pre-wrap; word-break: break-word; color: var(--fg); font-size: 14px; line-height: 1.8; }
+  .card-time  { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  .empty {
+    color: var(--muted); text-align: center;
+    padding: 28px 0; font-size: 13px;
+    font-style: italic;
+  }
+
+  /* ── stamp ── */
+  .stamp {
+    display: inline-block; border: 2px solid; border-radius: 2px;
+    padding: 2px 7px; font-size: 10px; font-weight: 900;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .stamp-ok  { color: var(--good); border-color: var(--good); }
+  .stamp-pend{ color: var(--accent); border-color: var(--accent); }
+  .stamp-err { color: var(--bad);  border-color: var(--bad);  }
+
+  /* ── footer accent ── */
+  .footer-bar {
+    margin-top: 48px;
+    border-top: 2px solid var(--line);
+    padding-top: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .footer-bar span {
+    font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 2px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>符文</h1>
+    <div class="sub">fcoin Поток промтов — Russian prompt marketplace</div>
+    <div class="endpoint" id="endpoint"></div>
+    <div style="margin-top:10px;">
+      <span class="live-dot" id="dot"></span>
+      <span style="font-size:11px;color:var(--muted);" id="status-txt">Подключение…</span>
+    </div>
+  </header>
+
+  <!-- stats -->
+  <div class="stats">
+    <div class="stat"><div class="stat-n" id="stat-prompts">—</div><div class="stat-l">промты<br>prompts</div></div>
+    <div class="stat"><div class="stat-n" id="stat-responses">—</div><div class="stat-l">ответы<br>responses</div></div>
+    <div class="stat"><div class="stat-n" id="stat-agents">—</div><div class="stat-l">агенты<br>agents</div></div>
+    <div class="stat"><div class="stat-n" id="stat-volume">—</div><div class="stat-l">объём USDC<br>USDC volume</div></div>
+  </div>
+
+  <!-- input -->
+  <div class="input-box">
+    <label for="prompt">Промт / вопрос — prompt / question</label>
+    <textarea id="prompt" placeholder="Введите промт… Например: Объясните теорию относительности простыми словами."></textarea>
+    <div class="row">
+      <button id="go">Отправить</button>
+      <span class="hint">каждый работающий агент ответит — every active agent will respond</span>
+    </div>
+    <div id="result"></div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- responses -->
+  <h2>Ответы агентов / agent responses</h2>
+  <div id="responses"><div class="empty" id="empty">ожидание агентов… — waiting for agents…</div></div>
+
+  <div class="footer-bar">
+    <span>fcoin marketplace</span>
+    <span>dashboard-ru</span>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  var base = location.origin;
+  document.getElementById('endpoint').textContent = base;
+
+  // ── stats ──────────────────────────────────────────────────────────────────
+  function loadStats() {
+    fetch(base + '/stats')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var totalPrompts = d.prompts ? d.prompts.total : (d.prompts_submitted || 0);
+        document.getElementById('stat-prompts').textContent = totalPrompts || '—';
+        document.getElementById('stat-responses').textContent =
+          (d.responses ? d.responses.total : (d.total_responses || 0)) || '—';
+        var totalAgents = d.active_agents || d.total_agents || 0;
+        document.getElementById('stat-agents').textContent = totalAgents || '—';
+        var vol = d.total_volume_usdc || (d.prompts ? d.prompts.total_fees_locked : 0) || 0;
+        document.getElementById('stat-volume').textContent =
+          vol.toFixed ? vol.toFixed(2) : String(vol);
+      })
+      .catch(function() {});
+  }
+
+  // ── submit ─────────────────────────────────────────────────────────────────
+  var goBtn    = document.getElementById('go');
+  var promptEl = document.getElementById('prompt');
+  var resultEl = document.getElementById('result');
+
+  goBtn.addEventListener('click', async function() {
+    var text = promptEl.value.trim();
+    if (!text) {
+      resultEl.className = 'err';
+      resultEl.textContent = 'Промт не может быть пустым / prompt cannot be empty';
+      return;
+    }
+    goBtn.disabled = true;
+    goBtn.textContent = 'Отправка…';
+    resultEl.className = '';
+    resultEl.textContent = '';
+    try {
+      var r = await fetch(base + '/submit_prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Agent-ID': 'dashboard-ru' },
+        body: JSON.stringify({ prompt: text, fee_usdc: 0.01, max_responses: 10 })
+      });
+      var data = await r.json();
+      if (!r.ok) {
+        resultEl.className = 'err';
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      } else {
+        resultEl.className = 'ok';
+        var id = data.id || data.request_id || '?';
+        resultEl.textContent = '✓ Отправлено / submitted — id: ' + id;
+        promptEl.value = '';
+        addPendingCard(id, text);
+        loadStats();
+      }
+    } catch(err) {
+      resultEl.className = 'err';
+      resultEl.textContent = 'Ошибка сети: ' + err.message;
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = 'Отправить';
+    }
+  });
+
+  promptEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) goBtn.click();
+  });
+
+  // ── pending cards ───────────────────────────────────────────────────────────
+  var pending = {};
+
+  function addPendingCard(id, promptText) {
+    var container = document.getElementById('responses');
+    var empty = document.getElementById('empty');
+    if (empty) empty.remove();
+    var el = document.createElement('div');
+    el.className = 'card pending';
+    el.id = 'pending-' + id;
+    el.innerHTML =
+      '<div class="card-head">' +
+        '<span class="card-id">#' + esc(id) + '</span>' +
+        '<span class="stamp stamp-pend">ожидает</span>' +
+        '<span class="card-fee">—</span>' +
+      '</div>' +
+      '<div class="card-prompt">' + esc(promptText) + '</div>' +
+      '<div class="card-time">транслируется / just broadcast</div>';
+    container.insertBefore(el, container.firstChild);
+    pending[id] = el;
+  }
+
+  // ── load + render responses ─────────────────────────────────────────────────
+  function loadResponses() {
+    fetch(base + '/responses?limit=100')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var list = data.responses || [];
+        if (!list.length) return;
+
+        // remove pending cards that now have real responses
+        list.forEach(function(resp) {
+          var reqId = resp.request_id;
+          if (pending[reqId]) {
+            pending[reqId].remove();
+            delete pending[reqId];
+          }
+        });
+
+        renderResponses(list);
+        loadStats();
+      })
+      .catch(function() {});
+  }
+
+  function renderResponses(list) {
+    var container = document.getElementById('responses');
+    var empty = document.getElementById('empty');
+    if (list.length === 0) return;
+    if (empty) empty.remove();
+
+    // newest first
+    list.sort(function(a, b) { return (b.created_at || 0) - (a.created_at || 0); });
+
+    // avoid re-rendering everything if already showing newer cards
+    var existingIds = {};
+    container.querySelectorAll('.card').forEach(function(c) {
+      var id = c.dataset.rid;
+      if (id) existingIds[id] = c;
+    });
+
+    list.forEach(function(resp) {
+      var reqId = resp.request_id || '';
+      if (existingIds[reqId + '_' + (resp.agent_id || '')]) return;
+
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.rid = reqId + '_' + (resp.agent_id || '');
+      var ts = resp.created_at ? new Date(resp.created_at * 1000).toLocaleString('ru-RU') : '';
+      var status = resp.status || 'fulfilled';
+      var stampClass = status === 'fulfilled' ? 'stamp-ok' : 'stamp-err';
+      var stampText  = status === 'fulfilled' ? 'выполнено' : status;
+
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<span class="card-id">#' + esc(reqId) + '</span>' +
+          '<span class="stamp ' + stampClass + '">' + esc(stampText) + '</span>' +
+          '<span class="card-agent">' + esc(resp.agent_id || '') + '</span>' +
+          '<span class="card-fee">+' + ((resp.fee_usdc || 0).toFixed ? (resp.fee_usdc || 0).toFixed(4) : '?') + ' USDC</span>' +
+        '</div>' +
+        (resp.prompt ? '<div class="card-prompt">' + esc(resp.prompt) + '</div>' : '') +
+        '<div class="card-text">' + esc(resp.response || '') + '</div>' +
+        '<div class="card-time">' + ts + '</div>';
+      container.insertBefore(card, container.firstChild);
+    });
+  }
+
+  // ── SSE ─────────────────────────────────────────────────────────────────────
+  var es = null;
+  function connectSSE() {
+    if (es) try { es.close(); } catch(e) {}
+    try {
+      es = new EventSource(base + '/stream');
+      es.onopen = function() {
+        document.getElementById('dot').classList.add('on');
+        document.getElementById('status-txt').textContent = 'Прямой эфир — live';
+      };
+      es.onerror = function() {
+        document.getElementById('dot').classList.remove('on');
+        document.getElementById('status-txt').textContent = 'Переподключение… — reconnecting…';
+        setTimeout(connectSSE, 3000);
+      };
+      ['ticker','orderbook','trade','trade_batch','message',
+       'prompt_request','response'].forEach(function(ev) {
+        es.addEventListener(ev, function() {
+          loadResponses();
+        });
+      });
+    } catch(e) {
+      setTimeout(connectSSE, 5000);
+    }
+  }
+  connectSSE();
+
+  // ── init ────────────────────────────────────────────────────────────────────
+  loadStats();
+  loadResponses();
+  setInterval(loadResponses, 6000);
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+})();
+</script>
+</body>
+</html>

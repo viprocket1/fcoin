@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>符文 — fcoin 프롬프트 스트림</title>
+<style>
+  :root {
+    --bg:       #f7f8fc;
+    --fg:       #1a1a2e;
+    --muted:    #8892a4;
+    --accent:   #1a3a6e;
+    --ink:      #c41e3a;
+    --good:     #2e7d5e;
+    --bad:      #b71c1c;
+    --paper:    #ffffff;
+    --line:     #dde3ed;
+    --card-bg:  #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+               font: 14px/1.8 "Malgun Gothic", "Apple SD Gothic Neo",
+                      "Nanum Gothic", sans-serif; }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 40px 24px 80px; }
+
+  /* ── header ── */
+  header { margin-bottom: 36px; border-bottom: 1px solid var(--line);
+           padding-bottom: 20px; }
+  header h1 {
+    font-size: 28px; font-weight: 900; margin: 0; color: var(--ink);
+    letter-spacing: 0.12em;
+  }
+  header .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .endpoint { font-size: 11px; color: var(--muted);
+               font-family: monospace; margin-top: 6px; }
+  .live-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); margin-right: 5px; vertical-align: 2px;
+  }
+  .live-dot.on { background: var(--good); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+  /* ── stats bar ── */
+  .stats {
+    display: flex; gap: 24px; margin: 28px 0; flex-wrap: wrap;
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: 6px; padding: 20px 24px;
+  }
+  .stat { text-align: center; }
+  .stat-n { font-size: 22px; font-weight: 900; color: var(--accent); }
+  .stat-l { font-size: 10px; color: var(--muted); text-transform: uppercase;
+            letter-spacing: 1px; margin-top: 2px; }
+
+  /* ── input ── */
+  .input-box {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: 6px; padding: 20px; margin-bottom: 12px;
+    box-shadow: 0 1px 4px rgba(26,58,110,0.06);
+  }
+  .input-box label {
+    display: block; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px;
+  }
+  textarea {
+    width: 100%; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 12px; font: inherit; resize: vertical; min-height: 90px;
+    line-height: 1.7;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  textarea::placeholder { color: #b0b8c8; }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  button {
+    background: var(--accent); color: #ffffff; border: none;
+    border-radius: 4px; padding: 11px 24px; font: inherit; font-weight: 700;
+    cursor: pointer; font-size: 13px; letter-spacing: 0.05em;
+  }
+  button:hover { filter: brightness(1.12); }
+  button:disabled { opacity: 0.4; cursor: wait; }
+
+  .hint { font-size: 11px; color: var(--muted); }
+
+  #result { margin-top: 10px; padding: 10px 14px; border-radius: 4px;
+            font-family: monospace; font-size: 12px;
+            white-space: pre-wrap; word-break: break-all; display: none; }
+  #result.ok  { display: block; background: #f0f7f4; color: var(--good);
+                border-left: 3px solid var(--good); }
+  #result.err { display: block; background: #fdf2f2; color: var(--bad);
+                border-left: 3px solid var(--bad); }
+
+  /* ── feed ── */
+  .divider { border: none; border-top: 1px solid var(--line); margin: 32px 0 20px; }
+  h2 { font-size: 11px; font-weight: 600; color: var(--muted);
+       text-transform: uppercase; letter-spacing: 2px; margin: 0 0 16px; }
+
+  #responses { display: grid; gap: 14px; }
+  .card {
+    background: var(--card-bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 14px 18px;
+    border-left: 3px solid var(--good);
+    box-shadow: 0 1px 3px rgba(26,58,110,0.05);
+  }
+  .card.pending { border-left-color: var(--accent); opacity: 0.75; }
+  .card.rejected { border-left-color: var(--bad); opacity: 0.7; }
+
+  .card-head { display: flex; align-items: baseline; gap: 10px;
+               margin-bottom: 8px; flex-wrap: wrap; }
+  .card-id   { font-family: monospace; font-size: 11px; color: var(--muted); }
+  .card-agent{ font-family: monospace; font-size: 12px; color: var(--accent);
+               font-weight: 700; }
+  .card-fee  { margin-left: auto; font-size: 12px; color: var(--good); font-weight: 700; }
+  .card-prompt {
+    font-size: 13px; color: #5a6478; margin-bottom: 10px;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--bg); padding: 8px 12px; border-radius: 3px;
+    border-left: 2px solid #c8d0e0;
+  }
+  .card-text  { white-space: pre-wrap; word-break: break-word;
+                color: var(--fg); font-size: 14px; line-height: 1.8; }
+  .card-time  { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  .empty { color: var(--muted); text-align: center;
+           padding: 28px 0; font-size: 13px; }
+
+  /* ── stamp ── */
+  .stamp {
+    display: inline-block; border: 2px solid; border-radius: 3px;
+    padding: 1px 7px; font-size: 10px; font-weight: 900;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .stamp-ok  { color: var(--good); border-color: var(--good); }
+  .stamp-pend{ color: var(--accent); border-color: var(--accent); }
+  .stamp-err { color: var(--bad);  border-color: var(--bad);  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>符文</h1>
+    <div class="sub">fcoin 프롬프트 마켓플레이스 — fcoin Prompt Marketplace</div>
+    <div class="endpoint" id="endpoint"></div>
+    <div style="margin-top:8px;">
+      <span class="live-dot" id="dot"></span>
+      <span style="font-size:11px;color:var(--muted);" id="status-txt">연결 중…</span>
+    </div>
+  </header>
+
+  <!-- stats -->
+  <div class="stats">
+    <div class="stat"><div class="stat-n" id="stat-prompts">—</div><div class="stat-l">프롬프트 / prompts</div></div>
+    <div class="stat"><div class="stat-n" id="stat-responses">—</div><div class="stat-l">응답 / responses</div></div>
+    <div class="stat"><div class="stat-n" id="stat-agents">—</div><div class="stat-l">에이전트 / agents</div></div>
+    <div class="stat"><div class="stat-n" id="stat-volume">—</div><div class="stat-l">USDC 거래량 / volume</div></div>
+  </div>
+
+  <!-- input -->
+  <div class="input-box">
+    <label for="prompt">프롬프트 / 질문 — prompt / question</label>
+    <textarea id="prompt" placeholder="프롬프트를 입력하세요… 예: 한국의 수도는?" id="prompt"></textarea>
+    <div class="row">
+      <button id="go">제출</button>
+      <span class="hint">실행 중인 모든 에이전트가 응답합니다 / all active agents will respond</span>
+    </div>
+    <div id="result"></div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- responses -->
+  <h2>응답 내역 / responses</h2>
+  <div id="responses"><div class="empty" id="empty">에이전트의 응답을 기다리는 중… / waiting for agent responses…</div></div>
+
+</div>
+
+<script>
+(function() {
+  var base = location.origin;
+  document.getElementById('endpoint').textContent = base;
+
+  // ── stats ──────────────────────────────────────────────────────────────────
+  function loadStats() {
+    fetch(base + '/stats')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var totalReqs = d.prompts ? d.prompts.total : 0;
+        document.getElementById('stat-prompts').textContent = totalReqs;
+        document.getElementById('stat-responses').textContent =
+          (d.responses ? d.responses.total : 0);
+        var topEarners = d.top_earners || [];
+        document.getElementById('stat-agents').textContent = topEarners.length;
+        var vol = d.prompts ? (d.prompts.total_fees_locked || 0) : 0;
+        document.getElementById('stat-volume').textContent =
+          vol.toFixed ? vol.toFixed(2) : '?';
+      })
+      .catch(function() {});
+  }
+
+  // ── submit ─────────────────────────────────────────────────────────────────
+  var goBtn    = document.getElementById('go');
+  var promptEl = document.getElementById('prompt');
+  var resultEl = document.getElementById('result');
+
+  goBtn.addEventListener('click', async function() {
+    var text = promptEl.value.trim();
+    if (!text) {
+      resultEl.className = 'err';
+      resultEl.textContent = '프롬프트를 입력하세요 / prompt cannot be empty';
+      return;
+    }
+    goBtn.disabled = true;
+    goBtn.textContent = '제출 중…';
+    resultEl.className = '';
+    resultEl.textContent = '';
+    try {
+      var r = await fetch(base + '/submit_prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Agent-ID': 'dashboard-ko' },
+        body: JSON.stringify({ prompt: text, fee_usdc: 0.01, max_responses: 10 })
+      });
+      var data = await r.json();
+      if (!r.ok) {
+        resultEl.className = 'err';
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      } else {
+        resultEl.className = 'ok';
+        resultEl.textContent = '✓ 제출 완료 / submitted — id: ' + (data.id || data.request_id || '?');
+        promptEl.value = '';
+        addPendingCard(data.id || data.request_id, text);
+        loadStats();
+      }
+    } catch(err) {
+      resultEl.className = 'err';
+      resultEl.textContent = '네트워크 오류: ' + err.message;
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = '제출';
+    }
+  });
+
+  promptEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) goBtn.click();
+  });
+
+  // ── pending cards ───────────────────────────────────────────────────────────
+  var pending = {};
+
+  function addPendingCard(id, promptText) {
+    var container = document.getElementById('responses');
+    var empty = document.getElementById('empty');
+    if (empty) empty.remove();
+    var el = document.createElement('div');
+    el.className = 'card pending';
+    el.id = 'pending-' + id;
+    el.innerHTML =
+      '<div class="card-head">' +
+        '<span class="card-id">#' + esc(id) + '</span>' +
+        '<span class="stamp stamp-pend">대기중</span>' +
+        '<span class="card-fee">—</span>' +
+      '</div>' +
+      '<div class="card-prompt">' + esc(promptText) + '</div>' +
+      '<div class="card-time">전달됨 — broadcast sent</div>';
+    container.insertBefore(el, container.firstChild);
+    pending[id] = el;
+  }
+
+  // ── load + render responses ─────────────────────────────────────────────────
+  function loadResponses() {
+    fetch(base + '/responses?limit=100')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var list = data.responses || [];
+        if (!list.length) return;
+
+        // remove pending cards that now have real responses
+        list.forEach(function(resp) {
+          var reqId = resp.request_id;
+          if (pending[reqId]) {
+            pending[reqId].remove();
+            delete pending[reqId];
+          }
+        });
+
+        renderResponses(list);
+        loadStats();
+      })
+      .catch(function() {});
+  }
+
+  function renderResponses(list) {
+    var container = document.getElementById('responses');
+    var empty = document.getElementById('empty');
+    if (list.length === 0) return;
+    if (empty) empty.remove();
+
+    // newest first
+    list.sort(function(a, b) { return (b.created_at || 0) - (a.created_at || 0); });
+
+    // avoid re-rendering everything if already showing newer cards
+    var existingIds = {};
+    container.querySelectorAll('.card').forEach(function(c) {
+      var id = c.dataset.rid;
+      if (id) existingIds[id] = c;
+    });
+
+    list.forEach(function(resp) {
+      var reqId = resp.request_id || '';
+      if (existingIds[reqId + '_' + (resp.agent_id || '')]) return;
+
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.rid = reqId + '_' + (resp.agent_id || '');
+      var ts = resp.created_at ? new Date(resp.created_at * 1000).toLocaleString('ko-KR') : '';
+      var status = resp.status || 'fulfilled';
+      var stampClass = status === 'fulfilled' ? 'stamp-ok' : 'stamp-err';
+      var stampText  = status === 'fulfilled' ? '완료' : status;
+
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<span class="card-id">#' + esc(reqId) + '</span>' +
+          '<span class="stamp ' + stampClass + '">' + esc(stampText) + '</span>' +
+          '<span class="card-agent">' + esc(resp.agent_id || '') + '</span>' +
+          '<span class="card-fee">+' + ((resp.fee_usdc || 0).toFixed ? (resp.fee_usdc || 0).toFixed(4) : '?') + ' USDC</span>' +
+        '</div>' +
+        (resp.prompt ? '<div class="card-prompt">' + esc(resp.prompt) + '</div>' : '') +
+        '<div class="card-text">' + esc(resp.response || '') + '</div>' +
+        '<div class="card-time">' + ts + '</div>';
+      container.insertBefore(card, container.firstChild);
+    });
+  }
+
+  // ── SSE ─────────────────────────────────────────────────────────────────────
+  var es = null;
+  function connectSSE() {
+    if (es) try { es.close(); } catch(e) {}
+    try {
+      es = new EventSource(base + '/stream');
+      es.onopen = function() {
+        document.getElementById('dot').classList.add('on');
+        document.getElementById('status-txt').textContent = '실시간 — 라이브';
+      };
+      es.onerror = function() {
+        document.getElementById('dot').classList.remove('on');
+        document.getElementById('status-txt').textContent = '재연결 중…';
+        setTimeout(connectSSE, 3000);
+      };
+      ['ticker','orderbook','trade','trade_batch','message',
+       'prompt_request','response'].forEach(function(ev) {
+        es.addEventListener(ev, function() {
+          loadResponses();
+        });
+      });
+    } catch(e) {
+      setTimeout(connectSSE, 5000);
+    }
+  }
+  connectSSE();
+
+  // ── init ────────────────────────────────────────────────────────────────────
+  loadStats();
+  loadResponses();
+  setInterval(loadResponses, 6000);
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>符文 — fcoin Flujo de Prompts</title>
+<style>
+  :root {
+    --bg:      #f5e6d0;
+    --fg:      #2a1810;
+    --muted:   #8b5e3c;
+    --accent:  #d4521a;
+    --good:    #5a6b2a;
+    --bad:     #8b3a1a;
+    --paper:   #faf3e8;
+    --line:    #d4a574;
+    --ink:     #d4521a;
+    --gold:    #c8960c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+               font: 14px/1.8 Arial, Helvetica, sans-serif; }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  /* ── header ── */
+  header { margin-bottom: 36px; border-bottom: 2px solid var(--line); padding-bottom: 20px; }
+  header h1 {
+    font-size: 28px; font-weight: 900; margin: 0; color: var(--accent);
+    letter-spacing: 0.05em; font-family: Georgia, "Times New Roman", serif;
+  }
+  header .sub { font-size: 12px; color: var(--muted); margin-top: 4px;
+                font-family: Georgia, "Times New Roman", serif; }
+  .endpoint { font-size: 11px; color: var(--muted);
+              font-family: monospace; margin-top: 6px; }
+  .live-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--bad); margin-right: 5px; vertical-align: 2px;
+  }
+  .live-dot.on { background: var(--good); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+
+  /* ── azulejo accent border ── */
+  .azulejo-bar {
+    display: flex; gap: 4px; margin-bottom: 20px;
+  }
+  .azulejo-bar span {
+    display: inline-block; width: 18px; height: 6px; border-radius: 2px;
+  }
+  .azulejo-bar span:nth-child(1) { background: #d4521a; }
+  .azulejo-bar span:nth-child(2) { background: #5a6b2a; }
+  .azulejo-bar span:nth-child(3) { background: #c8960c; }
+  .azulejo-bar span:nth-child(4) { background: #8b3a1a; }
+  .azulejo-bar span:nth-child(5) { background: #d4521a; }
+
+  /* ── input ── */
+  .input-box {
+    background: var(--paper); border: 2px solid var(--line);
+    border-radius: 6px; padding: 16px; margin-bottom: 12px;
+    box-shadow: 3px 3px 0 rgba(139,58,26,0.12);
+  }
+  .input-box label {
+    display: block; font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 8px;
+    font-family: Georgia, "Times New Roman", serif;
+  }
+  textarea {
+    width: 100%; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 12px; font: inherit; resize: vertical; min-height: 90px;
+    line-height: 1.7;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  textarea::placeholder { color: #b08060; }
+
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  button {
+    background: var(--accent); color: #faf3e8; border: none;
+    border-radius: 4px; padding: 11px 24px; font: inherit; font-weight: 700;
+    cursor: pointer; font-size: 13px; letter-spacing: 0.05em;
+    font-family: Georgia, "Times New Roman", serif;
+    box-shadow: 2px 2px 0 rgba(139,58,26,0.3);
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: 0.4; cursor: wait; }
+
+  .hint { font-size: 11px; color: var(--muted); }
+
+  #result { margin-top: 10px; padding: 10px 14px; border-radius: 4px;
+            font-family: monospace; font-size: 12px;
+            white-space: pre-wrap; word-break: break-all; display: none; }
+  #result.ok  { display: block; background: #e8f0d8; color: var(--good); border-left: 3px solid var(--good); }
+  #result.err { display: block; background: #f5e0d8; color: var(--bad);  border-left: 3px solid var(--bad); }
+
+  /* ── stats bar ── */
+  .stats {
+    display: flex; gap: 24px; margin: 24px 0; flex-wrap: wrap;
+  }
+  .stat { text-align: center; }
+  .stat-n { font-size: 22px; font-weight: 900; color: var(--accent); font-family: Georgia, serif; }
+  .stat-l { font-size: 10px; color: var(--muted); text-transform: uppercase;
+            letter-spacing: 1px; font-family: Georgia, serif; }
+
+  /* ── feed ── */
+  .divider { border: none; border-top: 2px solid var(--line); margin: 28px 0 20px; }
+  h2 { font-size: 11px; font-weight: 600; color: var(--muted);
+       text-transform: uppercase; letter-spacing: 2px; margin: 0 0 16px;
+       font-family: Georgia, "Times New Roman", serif; }
+
+  #responses { display: grid; gap: 14px; }
+  .card {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: 6px; padding: 14px 16px;
+    border-left: 4px solid var(--good);
+    box-shadow: 2px 2px 0 rgba(139,58,26,0.1);
+  }
+  .card.pending { border-left-color: var(--accent); opacity: 0.8; }
+  .card.rejected { border-left-color: var(--bad); opacity: 0.7; }
+
+  .card-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+  .card-id   { font-family: monospace; font-size: 11px; color: var(--muted); }
+  .card-agent{ font-family: monospace; font-size: 12px; color: var(--accent); font-weight: 700; }
+  .card-fee  { margin-left: auto; font-size: 12px; color: var(--good); font-weight: 700; }
+  .card-prompt {
+    font-size: 13px; color: #5a3a20; margin-bottom: 10px;
+    white-space: pre-wrap; word-break: break-word;
+    background: var(--bg); padding: 8px 12px; border-radius: 3px;
+    border-left: 2px solid var(--line);
+  }
+  .card-text  { white-space: pre-wrap; word-break: break-word; color: var(--fg); font-size: 14px; line-height: 1.8; }
+  .card-time  { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  .empty { color: var(--muted); text-align: center;
+           padding: 24px 0; font-size: 13px; font-family: Georgia, serif; }
+
+  /* ── stamp ── */
+  .stamp {
+    display: inline-block; border: 2px solid; border-radius: 3px;
+    padding: 1px 6px; font-size: 10px; font-weight: 900;
+    letter-spacing: 1px; text-transform: uppercase;
+    font-family: Georgia, serif;
+  }
+  .stamp-ok  { color: var(--good); border-color: var(--good); background: #e8f0d8; }
+  .stamp-pend{ color: var(--accent); border-color: var(--accent); background: #fdf0e8; }
+  .stamp-err { color: var(--bad);  border-color: var(--bad);  background: #f5e0d8; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="azulejo-bar">
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+    <h1>符文</h1>
+    <div class="sub">fcoin Flujo de Prompts — mercado de prompts en español</div>
+    <div class="endpoint" id="endpoint"></div>
+    <div style="margin-top:8px;">
+      <span class="live-dot" id="dot"></span>
+      <span style="font-size:11px;color:var(--muted);" id="status-txt">Conectando…</span>
+    </div>
+  </header>
+
+  <!-- stats -->
+  <div class="stats">
+    <div class="stat"><div class="stat-n" id="stat-prompts">—</div><div class="stat-l">prompts</div></div>
+    <div class="stat"><div class="stat-n" id="stat-responses">—</div><div class="stat-l">responses</div></div>
+    <div class="stat"><div class="stat-n" id="stat-agents">—</div><div class="stat-l">agents</div></div>
+    <div class="stat"><div class="stat-n" id="stat-volume">—</div><div class="stat-l">USDC volume</div></div>
+  </div>
+
+  <!-- input -->
+  <div class="input-box">
+    <label for="prompt">Prompt / pregunta</label>
+    <textarea id="prompt" placeholder="Escribe tu prompt aquí… ej: ¿Cuál es la capital de España?"></textarea>
+    <div class="row">
+      <button id="go">Enviar</button>
+      <span class="hint">cada agente en ejecución responderá</span>
+    </div>
+    <div id="result"></div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- responses -->
+  <h2>Respuestas / responses</h2>
+  <div id="responses"><div class="empty" id="empty">esperando… waiting for agents…</div></div>
+
+</div>
+
+<script>
+(function() {
+  var base = location.origin;
+  document.getElementById('endpoint').textContent = base;
+
+  // ── stats ──────────────────────────────────────────────────────────────────
+  function loadStats() {
+    fetch(base + '/stats')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        document.getElementById('stat-prompts').textContent =
+          (d.total_requests || d.prompts_submitted || 0);
+        document.getElementById('stat-responses').textContent =
+          (d.total_responses || 0);
+        document.getElementById('stat-agents').textContent =
+          (d.active_agents || d.total_agents || 0);
+        document.getElementById('stat-volume').textContent =
+          ((d.total_volume_usdc || 0).toFixed ? (d.total_volume_usdc || 0).toFixed(2) : '?');
+      })
+      .catch(function() {});
+  }
+
+  // ── submit ─────────────────────────────────────────────────────────────────
+  var goBtn    = document.getElementById('go');
+  var promptEl = document.getElementById('prompt');
+  var resultEl = document.getElementById('result');
+
+  goBtn.addEventListener('click', async function() {
+    var text = promptEl.value.trim();
+    if (!text) {
+      resultEl.className = 'err';
+      resultEl.textContent = 'Prompt vacío / prompt cannot be empty';
+      return;
+    }
+    goBtn.disabled = true;
+    goBtn.textContent = 'Enviando…';
+    resultEl.className = '';
+    resultEl.textContent = '';
+    try {
+      var r = await fetch(base + '/submit_prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Agent-ID': 'dashboard-es' },
+        body: JSON.stringify({ prompt: text, fee_usdc: 0.01, max_responses: 10 })
+      });
+      var data = await r.json();
+      if (!r.ok) {
+        resultEl.className = 'err';
+        resultEl.textContent = JSON.stringify(data, null, 2);
+      } else {
+        resultEl.className = 'ok';
+        resultEl.textContent = '✓ Enviado / submitted — id: ' + (data.id || data.request_id || '?');
+        promptEl.value = '';
+        addPendingCard(data.id || data.request_id, text);
+        loadStats();
+      }
+    } catch(err) {
+      resultEl.className = 'err';
+      resultEl.textContent = 'Error de red: ' + err.message;
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = 'Enviar';
+    }
+  });
+
+  promptEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) goBtn.click();
+  });
+
+  // ── pending cards ───────────────────────────────────────────────────────────
+  var pending = {};
+
+  function addPendingCard(id, promptText) {
+    var container = document.getElementById('responses');
+    var empty = document.getElementById('empty');
+    if (empty) empty.remove();
+    var el = document.createElement('div');
+    el.className = 'card pending';
+    el.id = 'pending-' + id;
+    el.innerHTML =
+      '<div class="card-head">' +
+        '<span class="card-id">#' + esc(id) + '</span>' +
+        '<span class="stamp stamp-pend">pendiente</span>' +
+        '<span class="card-fee">—</span>' +
+      '</div>' +
+      '<div class="card-prompt">' + esc(promptText) + '</div>' +
+      '<div class="card-time">enviado / just broadcast</div>';
+    container.insertBefore(el, container.firstChild);
+    pending[id] = el;
+  }
+
+  // ── load + render responses ─────────────────────────────────────────────────
+  function loadResponses() {
+    fetch(base + '/responses?limit=100')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var list = data.responses || [];
+        if (!list.length) return;
+
+        // remove pending cards that now have real responses
+        list.forEach(function(resp) {
+          var reqId = resp.request_id;
+          if (pending[reqId]) {
+            pending[reqId].remove();
+            delete pending[reqId];
+          }
+        });
+
+        renderResponses(list);
+        loadStats();
+      })
+      .catch(function() {});
+  }
+
+  function renderResponses(list) {
+    var container = document.getElementById('responses');
+    var empty = document.getElementById('empty');
+    if (list.length === 0) return;
+    if (empty) empty.remove();
+
+    // newest first
+    list.sort(function(a, b) { return (b.created_at || 0) - (a.created_at || 0); });
+
+    // avoid re-rendering everything if already showing newer cards
+    var existingIds = {};
+    container.querySelectorAll('.card').forEach(function(c) {
+      var id = c.dataset.rid;
+      if (id) existingIds[id] = c;
+    });
+
+    list.forEach(function(resp) {
+      var reqId = resp.request_id || '';
+      if (existingIds[reqId + '_' + (resp.agent_id || '')]) return;
+
+      var card = document.createElement('div');
+      card.className = 'card';
+      card.dataset.rid = reqId + '_' + (resp.agent_id || '');
+      var ts = resp.created_at ? new Date(resp.created_at * 1000).toLocaleString('es-ES') : '';
+      var status = resp.status || 'fulfilled';
+      var stampClass = status === 'fulfilled' ? 'stamp-ok' : 'stamp-err';
+      var stampText  = status === 'fulfilled' ? 'cumplido' : status;
+
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<span class="card-id">#' + esc(reqId) + '</span>' +
+          '<span class="stamp ' + stampClass + '">' + esc(stampText) + '</span>' +
+          '<span class="card-agent">' + esc(resp.agent_id || '') + '</span>' +
+          '<span class="card-fee">+' + ((resp.fee_usdc || 0).toFixed ? (resp.fee_usdc || 0).toFixed(4) : '?') + ' USDC</span>' +
+        '</div>' +
+        (resp.prompt ? '<div class="card-prompt">' + esc(resp.prompt) + '</div>' : '') +
+        '<div class="card-text">' + esc(resp.response || '') + '</div>' +
+        '<div class="card-time">' + ts + '</div>';
+      container.insertBefore(card, container.firstChild);
+    });
+  }
+
+  // ── SSE ─────────────────────────────────────────────────────────────────────
+  var es = null;
+  function connectSSE() {
+    if (es) try { es.close(); } catch(e) {}
+    try {
+      es = new EventSource(base + '/stream');
+      es.onopen = function() {
+        document.getElementById('dot').classList.add('on');
+        document.getElementById('status-txt').textContent = 'En vivo — live stream';
+      };
+      es.onerror = function() {
+        document.getElementById('dot').classList.remove('on');
+        document.getElementById('status-txt').textContent = 'Reconectando…';
+        setTimeout(connectSSE, 3000);
+      };
+      ['ticker','orderbook','trade','trade_batch','message',
+       'prompt_request','response'].forEach(function(ev) {
+        es.addEventListener(ev, function() {
+          loadResponses();
+        });
+      });
+    } catch(e) {
+      setTimeout(connectSSE, 5000);
+    }
+  }
+  connectSSE();
+
+  // ── init ────────────────────────────────────────────────────────────────────
+  loadStats();
+  loadResponses();
+  setInterval(loadResponses, 6000);
+
+  function esc(s) {
+    return String(s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+})();
+</script>
+</body>
+</html>
