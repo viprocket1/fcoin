@@ -123,8 +123,47 @@
   .stamp-ok  { color: var(--good); border-color: var(--good); }
   .stamp-pend{ color: var(--ink);  border-color: var(--ink);  }
   .stamp-err { color: var(--bad);  border-color: var(--bad);  }
+
+  /* ── machine registry (inlined) ── */
+  .reg-block {
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--bg);
+  }
+  .reg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .reg-title { font-size: 11px; color: var(--ink); letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; }
+  .reg-count { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .reg-modes { display: flex; gap: 0; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .reg-mode-btn {
+    background: var(--paper); color: var(--muted); border: none;
+    padding: 5px 10px; font: inherit; font-size: 11px; cursor: pointer;
+    letter-spacing: 1px;
+  }
+  .reg-mode-btn.active { background: var(--ink); color: var(--fg); font-weight: 700; }
+  .reg-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .reg-card {
+    background: var(--paper); border: 1px solid var(--line);
+    border-radius: 4px; padding: 8px 10px; cursor: pointer;
+    min-width: 140px; max-width: 220px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .reg-card:hover { border-color: var(--ink); }
+  .reg-card.selected { border-color: var(--ink); background: #2a1418; }
+  .reg-card .r-name {
+    font-family: monospace; font-size: 12px; font-weight: 700;
+    color: var(--ink); margin-bottom: 4px;
+  }
+  .reg-card .r-meta { font-size: 10px; color: var(--muted); line-height: 1.6; }
+  .reg-card .r-tag {
+    display: inline-block; background: var(--bg); color: var(--fg);
+    font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-top: 2px;
+    border: 1px solid var(--line);
+  }
+  .reg-empty { font-size: 12px; color: var(--muted); padding: 8px 0; }
+  .reg-err { font-size: 12px; color: var(--bad); padding: 8px 0; }
 </style>
-  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -150,14 +189,25 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">プロンプト / prompt</label>
-      <div id="fcoin-registry"></div>
-
-  <textarea id="prompt" placeholder="プロンプトを入力… 例：日本の首都は？"></textarea>
+    <textarea id="prompt" placeholder="プロンプトを入力… 例：日本の首都は？"></textarea>
     <div class="row">
       <button id="go">送信する</button>
-      <span class="hint">全ての実行中agara agentsが回答します</span>
+      <span class="hint" id="hint">全ての実行中agara agentsが回答します</span>
     </div>
     <div id="result"></div>
+
+    <!-- machine registry (inlined) -->
+    <div class="reg-block" id="reg-block" style="display:none;">
+      <div class="reg-head">
+        <span class="reg-title">マシン / machines</span>
+        <span class="reg-count" id="reg-count"></span>
+      </div>
+      <div class="reg-modes" style="margin-bottom:10px;">
+        <button class="reg-mode-btn active" id="reg-mode-all" type="button">全員へ配信 / broadcast</button>
+        <button class="reg-mode-btn" id="reg-mode-one" type="button">単発送信 / send to one</button>
+      </div>
+      <div class="reg-grid" id="reg-grid"></div>
+    </div>
   </div>
 
   <hr class="divider">
@@ -168,19 +218,106 @@
 
 </div>
 
-<script src="/static/registry.js"></script>
-<script>
-  FcoinRegistry.init({
-    anchor:  '#fcoin-registry',
-    agentId: 'dashboard-jp',
-    labels:  {"machines": "マシン / machines", "broadcast": "全員へ配信 / broadcast", "target": "単発送信 / send to one", "online": "オンライン", "loading": "マシン読込中…", "empty": "オンラインのマシンなし", "error": "マシン一覧を取得できません"},
-  });
-</script>
-
 <script>
 (function() {
   var base = location.origin;
   document.getElementById('endpoint').textContent = base;
+
+  // ── machine registry (inlined) ──────────────────────────────────────────
+  var machines = [];
+  var selectedMachine = null;
+  var broadcastMode = 'all';
+
+  // Get DOM refs up front so btnUpdate() can reference goBtn
+  var goBtn    = document.getElementById('go');
+
+  function regLoad() {
+    fetch(base + '/machines')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        machines = data.machines || [];
+        regRender();
+      })
+      .catch(function() {
+        document.getElementById('reg-block').style.display = 'none';
+      });
+  }
+
+  function regRender() {
+    var block = document.getElementById('reg-block');
+    var count = document.getElementById('reg-count');
+    var grid  = document.getElementById('reg-grid');
+
+    block.style.display = '';
+    count.textContent = machines.length + ' オンライン';
+
+    if (!machines.length) {
+      grid.innerHTML = '<div class="reg-empty">オンラインのマシンなし / no machines online</div>';
+      return;
+    }
+
+    grid.innerHTML = '';
+    machines.forEach(function(m) {
+      var card = document.createElement('div');
+      card.className = 'reg-card' + (selectedMachine && selectedMachine.agent_id === m.agent_id ? ' selected' : '');
+      var age = m.last_seen ? Math.round(Date.now() / 1000 - m.last_seen) : 0;
+      var ageStr = age < 60 ? age + 's 前' : Math.round(age / 60) + 'm 前';
+      card.innerHTML =
+        '<div class="r-name">' + esc(m.agent_id || '?') + '</div>' +
+        '<div class="r-meta">' +
+          esc(m.hostname || '?') + ' · ' + (m.cpu_cores || '?') + ' cores' +
+          (m.ram_total ? '<br>' + m.ram_total + ' RAM' : '') +
+        '</div>' +
+        (m.llm_backend ? '<div class="r-tag">' + esc(m.llm_backend) + '</div>' : '') +
+        '<div class="r-meta">' + ageStr + '</div>';
+      card.addEventListener('click', (function(mach) {
+        return function() {
+          selectedMachine = mach;
+          broadcastMode = 'one';
+          document.getElementById('reg-mode-all').classList.remove('active');
+          document.getElementById('reg-mode-one').classList.add('active');
+          document.querySelectorAll('.reg-card').forEach(function(c) { c.classList.remove('selected'); });
+          card.classList.add('selected');
+          hintUpdate();
+          btnUpdate();
+        };
+      })(m));
+      grid.appendChild(card);
+    });
+  }
+
+  function setMode(mode) {
+    broadcastMode = mode;
+    document.getElementById('reg-mode-all').classList.toggle('active', mode === 'all');
+    document.getElementById('reg-mode-one').classList.toggle('active', mode === 'one');
+    if (mode === 'all') {
+      selectedMachine = null;
+      document.querySelectorAll('.reg-card').forEach(function(c) { c.classList.remove('selected'); });
+    }
+    hintUpdate();
+    btnUpdate();
+  }
+
+  function hintUpdate() {
+    var hint = document.getElementById('hint');
+    if (broadcastMode === 'one' && selectedMachine) {
+      hint.textContent = '→ ' + selectedMachine.agent_id + ' に送信 / sending to: ' + selectedMachine.agent_id;
+    } else {
+      hint.textContent = '全ての実行中agara agentsが回答します / every running usdc agent will answer';
+    }
+  }
+
+  function btnUpdate() {
+    if (!goBtn.disabled) {
+      goBtn.textContent = broadcastMode === 'one' ? '単発送信 / send to one' : '送信する / broadcast';
+    }
+  }
+
+  document.getElementById('reg-mode-all').addEventListener('click', function() { setMode('all'); });
+  document.getElementById('reg-mode-one').addEventListener('click', function() { setMode('one'); });
+
+  regLoad();
+  setInterval(regLoad, 10000);
 
   // ── stats ──────────────────────────────────────────────────────────────────
   function loadStats() {
@@ -200,7 +337,6 @@
   }
 
   // ── submit ─────────────────────────────────────────────────────────────────
-  var goBtn    = document.getElementById('go');
   var promptEl = document.getElementById('prompt');
   var resultEl = document.getElementById('result');
 
@@ -216,10 +352,14 @@
     resultEl.className = '';
     resultEl.textContent = '';
     try {
+      var body = { prompt: text, fee_usdc: 0.01, max_responses: 10 };
+      if (broadcastMode === 'one' && selectedMachine) {
+        body.target_agent_id = selectedMachine.agent_id;
+      }
       var r = await fetch(base + '/submit_prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Agent-ID': 'dashboard-jp' },
-        body: JSON.stringify({ prompt: text, fee_usdc: 0.01, max_responses: 10 })
+        body: JSON.stringify(body)
       });
       var data = await r.json();
       if (!r.ok) {
@@ -227,7 +367,10 @@
         resultEl.textContent = JSON.stringify(data, null, 2);
       } else {
         resultEl.className = 'ok';
-        resultEl.textContent = '✓ 送信完了 / submitted — id: ' + (data.id || data.request_id || '?');
+        var recip = (broadcastMode === 'one' && selectedMachine)
+          ? '→ ' + selectedMachine.agent_id
+          : '全員 / broadcast';
+        resultEl.textContent = '✓ ' + recip + ' 送信完了 / submitted — id: ' + (data.id || data.request_id || '?');
         promptEl.value = '';
         addPendingCard(data.id || data.request_id, text);
         loadStats();
@@ -237,7 +380,7 @@
       resultEl.textContent = 'ネットワークエラー: ' + err.message;
     } finally {
       goBtn.disabled = false;
-      goBtn.textContent = '送信する';
+      btnUpdate();
     }
   });
 
