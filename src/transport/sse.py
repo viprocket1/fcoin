@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from ..server import MCPServer
 
 from ..stream import market_stream
+from ..prompts import HarvestRegistry, harvest_registry
 from starlette.responses import FileResponse, StreamingResponse
 
 log = logging.getLogger("fcoin.mcp.sse")
@@ -128,6 +129,7 @@ API_INDEX: list[dict] = [
     {"method": "GET",  "path": "/dashboard/de","name": "dashboard_de", "desc": "German-style prompt stream UI"},
     {"method": "GET",  "path": "/dashboard/fr","name": "dashboard_fr", "desc": "French-style prompt stream UI"},
     {"method": "GET",  "path": "/dashboard/ar","name": "dashboard_ar", "desc": "Arabic-style RTL prompt stream UI"},
+    {"method": "GET",  "path": "/dashboard/ru","name": "dashboard_ru", "desc": "Russian-style prompt stream UI"},
     {"method": "GET",  "path": "/dashboard/es","name": "dashboard_es", "desc": "Spanish-style prompt stream UI"},
     {"method": "GET",  "path": "/health",      "name": "health",       "desc": "liveness check for Render / load balancers"},
 
@@ -140,6 +142,8 @@ API_INDEX: list[dict] = [
     # --- agent identity / portfolio ---
     {"method": "POST", "path": "/register",    "name": "register",     "desc": "create a new agent (returns agent_id + secret)"},
     {"method": "POST", "path": "/recover",     "name": "recover",      "desc": "recover an agent from agent_id + secret"},
+    {"method": "POST", "path": "/register_machine", "name": "register_machine", "desc": "harvest agent registers its machine spec; upserts into HarvestRegistry; returns {status, last_seen}"},
+    {"method": "GET",  "path": "/machines",   "name": "machines",     "desc": "list all alive harvest agents (seen in last 120s), sorted newest-first"},
     {"method": "GET",  "path": "/agents",      "name": "agents",       "desc": "list every agent and their USDC/fcoin balance"},
     {"method": "GET",  "path": "/portfolio",   "name": "portfolio",    "desc": "one agent's wallet (USDC + fcoin, available + held)"},
     {"method": "GET",  "path": "/wallet",      "name": "wallet",       "desc": "agent's raw wallet address + balances"},
@@ -411,6 +415,8 @@ async def _submit_prompt(request: Request) -> JSONResponse:
             allowed_backends = [str(s).strip() for s in ab_raw if str(s).strip()]
         else:
             allowed_backends = []
+        # Routing: if specified, route to a specific machine only.
+        target_agent_id = str(body.get("target_agent_id", "") or "").strip()
 
         from ..prompts import prompt_market
         result = prompt_market.submit_prompt(
@@ -422,6 +428,7 @@ async def _submit_prompt(request: Request) -> JSONResponse:
             fee_per_input_token_usdc=fee_per_input_token_usdc,
             min_response_words=min_response_words,
             allowed_backends=allowed_backends,
+            target_agent_id=target_agent_id,
         )
         return JSONResponse({"agent_id": agent_id, **result})
     except Exception as exc:
@@ -756,6 +763,48 @@ async def _recover(request: Request) -> JSONResponse:
         return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=400)
 
 
+async def _register_machine(request: Request) -> JSONResponse:
+    """
+    POST /register_machine — Harvest agent registers (or refreshes) its machine spec.
+    Body: {agent_id, hostname, os, cpu_cores, ram_total, ram_avail, disk, uptime, llm_backend}
+    The agent_id field is required; all others are optional machine-spec fields.
+    Returns {"status": "ok", "last_seen": timestamp}.
+    """
+    try:
+        body = await request.json()
+        agent_id = body.get("agent_id", "")
+        if not agent_id:
+            return JSONResponse({"error": "agent_id is required"}, status_code=400)
+        last_seen = harvest_registry.upsert(
+            agent_id,
+            hostname=body.get("hostname", ""),
+            os=body.get("os", ""),
+            cpu_cores=body.get("cpu_cores", 0),
+            ram_total=body.get("ram_total", 0),
+            ram_avail=body.get("ram_avail", 0),
+            disk=body.get("disk", 0),
+            uptime=body.get("uptime", 0),
+            llm_backend=body.get("llm_backend", ""),
+        )
+        return JSONResponse({"status": "ok", "last_seen": last_seen})
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
+async def _list_machines(request: Request) -> JSONResponse:
+    """
+    GET /machines — Return all alive harvest agents, newest-first.
+    An agent is "alive" if it was last seen within 120 seconds.
+    """
+    try:
+        machines = harvest_registry.list_alive()
+        return JSONResponse({"machines": machines})
+    except Exception as exc:
+        import traceback; traceback.print_exc()
+        return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=500)
+
+
 async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) -> None:
     if SseServerTransport is None:
         raise ImportError(
@@ -820,6 +869,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/dashboard/de", _dashboard_de, methods=["GET"])
     app.add_route("/dashboard/fr", _dashboard_fr, methods=["GET"])
     app.add_route("/dashboard/ar", _dashboard_ar, methods=["GET"])
+    app.add_route("/dashboard/ru", _dashboard_ru, methods=["GET"])
     app.add_route("/dashboard/pt", _dashboard_pt, methods=["GET"])
     app.add_route("/dashboard/es", _dashboard_es, methods=["GET"])
     app.add_route("/health", _health, methods=["GET"])
@@ -841,6 +891,8 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/prompt/{id}", _cancel_prompt, methods=["DELETE"])
     app.add_route("/register", _register, methods=["POST"])
     app.add_route("/recover", _recover, methods=["POST"])
+    app.add_route("/register_machine", _register_machine, methods=["POST"])
+    app.add_route("/machines", _list_machines, methods=["GET"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.add_route("/stream", handle_market_stream, methods=["GET"])
     app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])

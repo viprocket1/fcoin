@@ -23,6 +23,55 @@ from typing import Optional   # noqa
 log = logging.getLogger("fcoin.prompts")
 
 
+# -----------------------------------------------------------------------------
+# HarvestRegistry — machine registry for harvest agents
+# -----------------------------------------------------------------------------
+class HarvestRegistry:
+    """
+    Thread-safe singleton registry of registered harvest agents.
+    Each entry maps agent_id → {agent_id, hostname, os, cpu_cores,
+    ram_total, ram_avail, disk, uptime, llm_backend, last_seen}.
+    """
+
+    ALIVE_THRESHOLD = 120.0  # seconds
+
+    def __init__(self) -> None:
+        self._entries: dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def upsert(self, agent_id: str, **fields: object) -> float:
+        """Upsert a machine entry. Returns the new last_seen timestamp."""
+        now = time.time()
+        with self._lock:
+            entry = dict(fields)
+            entry["agent_id"] = agent_id
+            entry["last_seen"] = now
+            self._entries[agent_id] = entry
+        return now
+
+    def is_alive(self, agent_id: str) -> bool:
+        """Return True if the agent was last seen within ALIVE_THRESHOLD seconds."""
+        with self._lock:
+            entry = self._entries.get(agent_id)
+            if entry is None:
+                return False
+            return (time.time() - entry.get("last_seen", 0)) < self.ALIVE_THRESHOLD
+
+    def list_alive(self) -> list[dict]:
+        """Return all alive machines, sorted newest-first."""
+        now = time.time()
+        with self._lock:
+            alive = [
+                dict(e) for e in self._entries.values()
+                if (now - e.get("last_seen", 0)) < self.ALIVE_THRESHOLD
+            ]
+        alive.sort(key=lambda e: e.get("last_seen", 0), reverse=True)
+        return alive
+
+
+harvest_registry = HarvestRegistry()
+
+
 def count_input_tokens(prompt: str) -> int:
     """Approximate input token count for a prompt.
 
@@ -69,6 +118,9 @@ class PromptRequest:
     # Provenance: the submitter can whitelist which LLM backends may
     # answer. Empty list = any backend OK. e.g. ["hermes","codex","ollama"]
     allowed_backends: list[str] = field(default_factory=list)
+    # Routing: if non-empty, only the matching agent_id may answer.
+    # Empty = broadcast to all registered harvest agents.
+    target_agent_id: str = ""
 
 
 @dataclass
@@ -136,6 +188,7 @@ class PromptMarket:
         fee_per_input_token_usdc: float | None = None,
         min_response_words: int = 0,
         allowed_backends: list[str] | None = None,
+        target_agent_id: str = "",
     ) -> dict:
         """
         Submit a prompt to the marketplace.
@@ -196,6 +249,7 @@ class PromptMarket:
             locked_usdc=cost,
             min_response_words=min_response_words,
             allowed_backends=list(allowed_backends or []),
+            target_agent_id=(target_agent_id or "").strip(),
         )
         with self._lock:
             self._requests[req_id] = req
@@ -444,6 +498,7 @@ class PromptMarket:
             # Anti-stub + provenance.
             "min_response_words":          req.min_response_words or self._min_response_words,
             "allowed_backends":            req.allowed_backends,
+            "target_agent_id":             req.target_agent_id,
         }
 
     def _broadcast_request(self, req: PromptRequest) -> None:
@@ -452,11 +507,13 @@ class PromptMarket:
         payload = {
             "type": "prompt_request",
             "data": {
-                "request_id":    req.id,
-                "prompt":        req.prompt,
-                "fee_usdc":      req.fee_usdc,
-                "max_responses": req.max_responses,
-                "model_hint":    req.model_hint,
+                "request_id":      req.id,
+                "prompt":          req.prompt,
+                "fee_usdc":        req.fee_usdc,
+                "max_responses":   req.max_responses,
+                "model_hint":      req.model_hint,
+                "submitter":       req.submitter,
+                "target_agent_id": req.target_agent_id,
             },
         }
         market_stream.broadcast(payload)

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rune — broadcast prompt to all agents</title>
+<title>rune — prompt marketplace</title>
 <style>
   :root {
     --bg: #0e0f12;
@@ -14,13 +14,14 @@
     --bad:  #ef4444;
     --panel: #16181d;
     --line: #262932;
+    --tag-bg: #1e2030;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
                font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text",
                      "Segoe UI", Roboto, sans-serif; }
 
-  .wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 60px; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 28px 20px 60px; }
 
   header { display: flex; align-items: baseline; gap: 14px;
             margin-bottom: 28px; flex-wrap: wrap; }
@@ -34,6 +35,54 @@
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
   .endpoint { margin-left: auto; font-size: 11px; color: var(--muted);
               font-family: ui-monospace, monospace; }
+
+  /* ---- machine selector ---- */
+  .machines-section { margin-bottom: 24px; }
+
+  .machines-bar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .machines-bar .label { font-size: 12px; color: var(--muted); font-weight: 600;
+                          text-transform: uppercase; letter-spacing: 1.2px; }
+  .machines-bar .count { font-size: 12px; color: var(--muted); }
+
+  #machine-list {
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+
+  .machine-card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px;
+    cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    min-width: 130px; max-width: 200px;
+  }
+  .machine-card:hover { border-color: var(--accent); }
+  .machine-card.selected { border-color: var(--accent); background: #1e1810; }
+  .machine-card .m-name {
+    font-family: ui-monospace, monospace; font-size: 12px;
+    font-weight: 600; color: var(--accent); margin-bottom: 4px;
+  }
+  .machine-card .m-meta { font-size: 11px; color: var(--muted); line-height: 1.6; }
+  .machine-card .m-backend {
+    display: inline-block; background: var(--tag-bg); color: var(--fg);
+    font-size: 10px; padding: 1px 5px; border-radius: 4px; margin-top: 3px;
+  }
+  .machine-card .m-offline { color: var(--bad); font-size: 11px; }
+
+  .machines-loading, .machines-empty { font-size: 13px; color: var(--muted); }
+
+  /* ---- broadcast mode toggle ---- */
+  .mode-toggle {
+    display: inline-flex; gap: 0; border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden; margin-bottom: 10px;
+  }
+  .mode-toggle button {
+    background: var(--panel); color: var(--muted);
+    border: none; padding: 7px 16px; font: inherit; font-size: 13px;
+    cursor: pointer;
+  }
+  .mode-toggle button.active { background: var(--accent); color: #0a0b0e; font-weight: 700; }
 
   textarea {
     width: 100%; background: #0a0b0e; color: var(--fg);
@@ -89,6 +138,14 @@
     opacity: 0.7;
   }
   .pending .card-fee { color: var(--accent); }
+
+  /* selected target badge */
+  .target-badge {
+    display: inline-block; background: var(--tag-bg); color: var(--accent);
+    font-size: 11px; padding: 2px 8px; border-radius: 6px;
+    border: 1px solid var(--accent); margin-left: 8px;
+    font-family: ui-monospace, monospace;
+  }
 </style>
 </head>
 <body>
@@ -96,10 +153,25 @@
 
   <header>
     <h1>rune</h1>
-    <span class="sub">broadcast prompt → all running usdc agents</span>
+    <span class="sub">prompt marketplace — pick your machine</span>
     <span class="live-dot" id="dot"></span>
     <span class="endpoint" id="endpoint"></span>
   </header>
+
+  <!-- machine selector -->
+  <div class="machines-section">
+    <div class="machines-bar">
+      <span class="label">machines</span>
+      <span class="count" id="machine-count"></span>
+    </div>
+    <div class="mode-toggle">
+      <button id="mode-all" class="active" onclick="setMode('all')">broadcast to all</button>
+      <button id="mode-one" onclick="setMode('one')">send to one</button>
+    </div>
+    <div id="machine-list">
+      <span class="machines-loading">loading machines…</span>
+    </div>
+  </div>
 
   <!-- input -->
   <div>
@@ -124,6 +196,88 @@
   var base = location.origin;
   document.getElementById('endpoint').textContent = base;
 
+  // ----- machine registry -----
+  var machines = [];     // [{agent_id, hostname, os, cpu_cores, ram_total, llm_backend, last_seen}]
+  var selectedMachine = null;
+  var broadcastMode = 'all';  // 'all' or 'one'
+
+  function setMode(mode) {
+    broadcastMode = mode;
+    document.getElementById('mode-all').classList.toggle('active', mode === 'all');
+    document.getElementById('mode-one').classList.toggle('active', mode === 'one');
+    if (mode === 'all') {
+      selectedMachine = null;
+      document.querySelectorAll('.machine-card').forEach(function(c) { c.classList.remove('selected'); });
+      updateHint();
+    }
+  }
+
+  function updateHint() {
+    var hint = document.getElementById('hint');
+    if (broadcastMode === 'one' && selectedMachine) {
+      hint.textContent = 'sending to: ' + selectedMachine.agent_id;
+    } else {
+      hint.textContent = 'every running usdc agent will answer';
+    }
+  }
+
+  function loadMachines() {
+    fetch(base + '/machines')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        machines = data.machines || [];
+        renderMachines();
+      })
+      .catch(function() {
+        document.getElementById('machine-list').innerHTML =
+          '<span class="machines-empty">could not load machines</span>';
+      });
+  }
+
+  function renderMachines() {
+    var container = document.getElementById('machine-list');
+    var count = document.getElementById('machine-count');
+    count.textContent = machines.length + ' online';
+
+    if (!machines.length) {
+      container.innerHTML = '<span class="machines-empty">no machines online — all agents offline</span>';
+      return;
+    }
+
+    container.innerHTML = '';
+    machines.forEach(function(m) {
+      var card = document.createElement('div');
+      card.className = 'machine-card' + (selectedMachine && selectedMachine.agent_id === m.agent_id ? ' selected' : '');
+      card.title = 'Click to select this machine';
+      var age = m.last_seen ? Math.round((Date.now() / 1000 - m.last_seen)) : 0;
+      var ageStr = age < 60 ? age + 's ago' : Math.round(age / 60) + 'm ago';
+      card.innerHTML =
+        '<div class="m-name">' + esc(m.agent_id || '?') + '</div>' +
+        '<div class="m-meta">' +
+          esc(m.hostname || '?') + ' · ' + (m.cpu_cores || '?') + ' cores' +
+          (m.ram_total ? '<br>' + m.ram_total + ' RAM' : '') +
+        '</div>' +
+        (m.llm_backend ? '<div class="m-backend">' + esc(m.llm_backend) + '</div>' : '') +
+        '<div class="m-meta">seen ' + ageStr + '</div>';
+      card.addEventListener('click', (function(mach) {
+        return function() {
+          selectedMachine = mach;
+          broadcastMode = 'one';
+          document.getElementById('mode-all').classList.remove('active');
+          document.getElementById('mode-one').classList.add('active');
+          document.querySelectorAll('.machine-card').forEach(function(c) { c.classList.remove('selected'); });
+          card.classList.add('selected');
+          updateHint();
+        };
+      })(m));
+      container.appendChild(card);
+    });
+  }
+
+  // poll machines every 10s
+  loadMachines();
+  setInterval(loadMachines, 10000);
+
   // ----- submit -----
   var goBtn   = document.getElementById('go');
   var promptEl = document.getElementById('prompt');
@@ -137,14 +291,18 @@
       return;
     }
     goBtn.disabled = true;
-    goBtn.textContent = 'broadcasting…';
+    goBtn.textContent = broadcastMode === 'one' ? 'sending…' : 'broadcasting…';
     resultEl.className = '';
     resultEl.textContent = '';
     try {
+      var body = { prompt: text, fee_usdc: 0.01, max_responses: 10 };
+      if (broadcastMode === 'one' && selectedMachine) {
+        body.target_agent_id = selectedMachine.agent_id;
+      }
       var r = await fetch(base + '/submit_prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Agent-ID': 'dashboard' },
-        body: JSON.stringify({ prompt: text, fee_usdc: 0.01, max_responses: 10 })
+        body: JSON.stringify(body)
       });
       var data = await r.json();
       if (!r.ok) {
@@ -152,18 +310,34 @@
         resultEl.textContent = JSON.stringify(data, null, 2);
       } else {
         resultEl.className = 'ok';
-        resultEl.textContent = '✓ broadcast sent — prompt id: ' + (data.id || '?');
+        var target = data.target_agent_id || data.id;
+        var msg = broadcastMode === 'one' && selectedMachine
+          ? 'sent to ' + selectedMachine.agent_id + ' — prompt id: ' + target
+          : 'broadcast sent — prompt id: ' + target;
+        resultEl.textContent = '✓ ' + msg;
         promptEl.value = '';
-        // add a pending card for this prompt
-        addPendingPrompt(data.id, text);
+        addPendingPrompt(target, text, selectedMachine);
       }
     } catch(err) {
       resultEl.className = 'err';
       resultEl.textContent = 'network error: ' + err.message;
     } finally {
       goBtn.disabled = false;
-      goBtn.textContent = 'broadcast prompt';
+      goBtn.textContent = broadcastMode === 'one' ? 'send to machine' : 'broadcast prompt';
     }
+  });
+
+  // update button label on mode change
+  function updateBtnLabel() {
+    if (!goBtn.disabled) {
+      goBtn.textContent = broadcastMode === 'one' ? 'send to machine' : 'broadcast prompt';
+    }
+  }
+  document.getElementById('mode-all').addEventListener('click', function() {
+    setMode('all'); updateBtnLabel();
+  });
+  document.getElementById('mode-one').addEventListener('click', function() {
+    setMode('one'); updateBtnLabel();
   });
 
   promptEl.addEventListener('keydown', function(e) {
@@ -173,17 +347,20 @@
   // ----- pending prompts we submitted (shown as pending cards) -----
   var pending = {};  // request_id -> {prompt, el}
 
-  function addPendingPrompt(id, promptText) {
+  function addPendingPrompt(id, promptText, machine) {
     var container = document.getElementById('responses');
     var empty = document.getElementById('empty');
     if (empty) empty.remove();
     var el = document.createElement('div');
     el.className = 'card pending';
     el.id = 'pending-' + id;
+    var targetLabel = machine
+      ? '<span class="target-badge">→ ' + esc(machine.agent_id) + '</span>'
+      : '';
     el.innerHTML =
       '<div class="card-head">' +
         '<span class="card-id">#' + id + '</span>' +
-        '<span class="card-agent">pending…</span>' +
+        '<span class="card-agent">pending…</span>' + targetLabel +
         '<span class="card-fee">—</span>' +
       '</div>' +
       '<div class="card-prompt">' + esc(promptText) + '</div>' +
