@@ -339,29 +339,28 @@ class PromptMarket:
                         f"({unique_ratio:.0%} unique words); looks templated"
                     )
 
-        # Credit the agent
-        # Per-response earnings = flat fee + input-token bonus.
-        # Token money was locked at submit time; the agent earns it
-        # on top of the flat fee whenever they answer.
-        earned = req.fee_usdc + req.input_tokens * req.fee_per_input_token_usdc
-        from .exchange import get_exchange, Balance
-        ex = get_exchange()
-        wallet = ex.get_or_create_agent(agent_id)
-        b = wallet._balances.get("usdc")
-        if b is None:
-            b = Balance()
-            wallet._balances["usdc"] = b
-        b.available += earned
-        wallet.sync_to_store(ex._store)
+            # Credit the agent
+            # Per-response earnings = flat fee + input-token bonus.
+            # Token money was locked at submit time; the agent earns it
+            # on top of the flat fee whenever they answer.
+            earned = req.fee_usdc + req.input_tokens * req.fee_per_input_token_usdc
+            from .exchange import get_exchange, Balance
+            ex = get_exchange()
+            wallet = ex.get_or_create_agent(agent_id)
+            b = wallet._balances.get("usdc")
+            if b is None:
+                b = Balance()
+                wallet._balances["usdc"] = b
+            b.available += earned
+            wallet.sync_to_store(ex._store)
 
-        resp_id = f"rsp_{uuid.uuid4().hex[:10]}"
-        resp = PromptResponse(
-            id=resp_id,
-            request_id=request_id,
-            agent_id=agent_id,
-            response=response.strip(),
-        )
-        with self._lock:
+            resp_id = f"rsp_{uuid.uuid4().hex[:10]}"
+            resp = PromptResponse(
+                id=resp_id,
+                request_id=request_id,
+                agent_id=agent_id,
+                response=response.strip(),
+            )
             self._responses[resp_id] = resp
             req.responses.append({
                 "response_id": resp_id,
@@ -546,6 +545,12 @@ class PromptMarket:
                         fee_usdc=float(pr_data["fee_usdc"]),
                         max_responses=int(pr_data.get("max_responses", 1)),
                         model_hint=pr_data.get("model_hint", ""),
+                        fee_per_input_token_usdc=float(pr_data.get("fee_per_input_token_usdc", 0.0)),
+                        input_tokens=int(pr_data.get("input_tokens", 0)),
+                        locked_usdc=float(pr_data.get("locked_usdc", 0.0)),
+                        min_response_words=int(pr_data.get("min_response_words", 0)),
+                        allowed_backends=list(pr_data.get("allowed_backends", [])),
+                        target_agent_id=pr_data.get("target_agent_id", ""),
                     )
                     req.created_at = float(pr_data.get("created_at", req.created_at))
                     req.status = pr_data.get("status", "open")
@@ -583,6 +588,12 @@ class PromptMarket:
                         "fee_usdc":       r.fee_usdc,
                         "max_responses":  r.max_responses,
                         "model_hint":     r.model_hint,
+                        "fee_per_input_token_usdc": r.fee_per_input_token_usdc,
+                        "input_tokens":   r.input_tokens,
+                        "locked_usdc":    r.locked_usdc,
+                        "min_response_words": r.min_response_words,
+                        "allowed_backends": list(r.allowed_backends),
+                        "target_agent_id": r.target_agent_id,
                         "status":         r.status,
                         "created_at":     r.created_at,
                         "paid_out_usdc":  r.paid_out_usdc,
