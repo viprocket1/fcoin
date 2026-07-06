@@ -361,35 +361,34 @@ class PromptMarket:
                 agent_id=agent_id,
                 response=response.strip(),
             )
-            with self._lock:
-                self._responses[resp_id] = resp
-                req.responses.append({
-                    "response_id": resp_id,
-                    "agent_id":    agent_id,
-                    "response":    resp.response,
-                    "ts":          resp.created_at,
-                })
-                # Per-response earnings = flat fee + input-token bonus.
-                # The token bonus is the *full* locked amount (the submitter
-                # pre-paid for tokens at submit time), so the agent always
-                # earns the token component when they answer.
-                earned = req.fee_usdc + req.input_tokens * req.fee_per_input_token_usdc
-                req.paid_out_usdc += earned
-                if len(req.responses) >= req.max_responses:
-                    req.status = "fulfilled"
-                    # Refund any unfilled portion: flat fee × unfilled slots
-                    # only — token money is fully consumed (we used the tokens).
-                    filled = len(req.responses)
-                    refund = (req.max_responses - filled) * req.fee_usdc
-                    if refund > 0:
-                        submitter_wallet = ex.get_or_create_agent(req.submitter)
-                        sb = submitter_wallet._balances.get("usdc")
-                        if sb is None:
-                            sb = type(sb)()
-                            submitter_wallet._balances["usdc"] = sb
-                        sb.available += refund
-                        submitter_wallet.sync_to_store(ex._store)
-                        log.info(f"[prompts] refund  id={request_id}  amount={refund:.4f}")
+            self._responses[resp_id] = resp
+            req.responses.append({
+                "response_id": resp_id,
+                "agent_id":    agent_id,
+                "response":    resp.response,
+                "ts":          resp.created_at,
+            })
+            # Per-response earnings = flat fee + input-token bonus.
+            # The token bonus is the *full* locked amount (the submitter
+            # pre-paid for tokens at submit time), so the agent always
+            # earns the token component when they answer.
+            earned = req.fee_usdc + req.input_tokens * req.fee_per_input_token_usdc
+            req.paid_out_usdc += earned
+            if len(req.responses) >= req.max_responses:
+                req.status = "fulfilled"
+                # Refund any unfilled portion: flat fee × unfilled slots
+                # only — token money is fully consumed (we used the tokens).
+                filled = len(req.responses)
+                refund = (req.max_responses - filled) * req.fee_usdc
+                if refund > 0:
+                    submitter_wallet = ex.get_or_create_agent(req.submitter)
+                    sb = submitter_wallet._balances.get("usdc")
+                    if sb is None:
+                        sb = type(sb)()
+                        submitter_wallet._balances["usdc"] = sb
+                    sb.available += refund
+                    submitter_wallet.sync_to_store(ex._store)
+                    log.info(f"[prompts] refund  id={request_id}  amount={refund:.4f}")
 
         log.info(
             f"[prompts] response  request={request_id}  agent={agent_id}  "
