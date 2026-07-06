@@ -124,6 +124,7 @@
   .stamp-pend{ color: var(--accent); border-color: var(--accent); }
   .stamp-err { color: var(--bad);  border-color: var(--bad);  }
 </style>
+  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -149,7 +150,9 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">प्रॉम्प्ट / सवाल — prompt / question</label>
-    <textarea id="prompt" placeholder="यहाँ अपना प्रॉम्प्ट लिखें… जैसे: भारत की राजधानी क्या है?"></textarea>
+      <div id="fcoin-registry"></div>
+
+  <textarea id="prompt" placeholder="यहाँ अपना प्रॉम्प्ट लिखें… जैसे: भारत की राजधानी क्या है?"></textarea>
     <div class="row">
       <button id="go">जमा करें</button>
       <span class="hint">हर चल रहे एजेंट का जवाब मिलेगा</span>
@@ -164,6 +167,15 @@
   <div id="responses"><div class="empty" id="empty">एजेंटों का इंतज़ार… waiting for agents…</div></div>
 
 </div>
+
+<script src="/static/registry.js"></script>
+<script>
+  FcoinRegistry.init({
+    anchor:  '#fcoin-registry',
+    agentId: 'dashboard-hi',
+    labels:  {"machines": "मशीनें / machines", "broadcast": "सभी को भेजें", "target": "एक को भेजें", "online": "ऑनलाइन", "loading": "मशीनें लोड हो रही हैं…", "empty": "कोई मशीन ऑनलाइन नहीं", "error": "मशीनें लोड नहीं हो सकीं"},
+  });
+</script>
 
 <script>
 (function() {

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 from ..stream import market_stream
 from ..prompts import HarvestRegistry, harvest_registry
-from starlette.responses import FileResponse, StreamingResponse
+from starlette.responses import FileResponse, Response, StreamingResponse
 
 log = logging.getLogger("fcoin.mcp.sse")
 
@@ -763,6 +763,24 @@ async def _recover(request: Request) -> JSONResponse:
         return JSONResponse({"error": type(exc).__name__ + ": " + str(exc)}, status_code=400)
 
 
+async def _static_registry_js(request: Request) -> Response:
+    """Serve the shared machine-registry widget JS."""
+    from pathlib import Path
+    p = Path(__file__).parent / "static" / "registry.js"
+    if not p.exists():
+        return Response("/* not found */", media_type="application/javascript")
+    return Response(p.read_text(encoding="utf-8"), media_type="application/javascript")
+
+
+async def _static_registry_css(request: Request) -> Response:
+    """Serve the shared machine-registry widget CSS."""
+    from pathlib import Path
+    p = Path(__file__).parent / "static" / "registry.css"
+    if not p.exists():
+        return Response("/* not found */", media_type="text/css")
+    return Response(p.read_text(encoding="utf-8"), media_type="text/css")
+
+
 async def _register_machine(request: Request) -> JSONResponse:
     """
     POST /register_machine — Harvest agent registers (or refreshes) its machine spec.
@@ -893,6 +911,8 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app.add_route("/recover", _recover, methods=["POST"])
     app.add_route("/register_machine", _register_machine, methods=["POST"])
     app.add_route("/machines", _list_machines, methods=["GET"])
+    app.add_route("/static/registry.js",  _static_registry_js,  methods=["GET"])
+    app.add_route("/static/registry.css", _static_registry_css, methods=["GET"])
     app.add_route("/events", handle_sse, methods=["GET"])
     app.add_route("/stream", handle_market_stream, methods=["GET"])
     app.add_route("/orderbook", lambda r: JSONResponse(get_exchange()._book.to_dict()), methods=["GET"])

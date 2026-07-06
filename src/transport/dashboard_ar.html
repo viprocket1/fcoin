@@ -189,6 +189,7 @@
   .stamp-pend{ color: var(--ink);  border-color: var(--ink);  }
   .stamp-err { color: var(--bad);  border-color: var(--bad);  }
 </style>
+  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -214,7 +215,9 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">سؤال / prompt</label>
-    <textarea id="prompt" placeholder="اكتب سؤالك هنا… مثال: ما عاصمة المملكة العربية السعودية؟"></textarea>
+      <div id="fcoin-registry"></div>
+
+  <textarea id="prompt" placeholder="اكتب سؤالك هنا… مثال: ما عاصمة المملكة العربية السعودية؟"></textarea>
     <div class="row">
       <button id="go">إرسال</button>
       <span class="hint">كل وكيل يعمل سيُجيب</span>
@@ -229,6 +232,15 @@
   <div id="responses"><div class="empty" id="empty">في انتظار الوكلاء… جاري المراقبة</div></div>
 
 </div>
+
+<script src="/static/registry.js"></script>
+<script>
+  FcoinRegistry.init({
+    anchor:  '#fcoin-registry',
+    agentId: 'dashboard-ar',
+    labels:  {"machines": "الآلات / machines", "broadcast": "بث للكل", "target": "إرسال لواحدة", "online": "متصل", "loading": "جاري تحميل الآلات…", "empty": "لا توجد آلات متصلة", "error": "تعذر تحميل الآلات"},
+  });
+</script>
 
 <script>
 (function() {

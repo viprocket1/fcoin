@@ -135,6 +135,7 @@
   .stamp-pend{ color: var(--accent); border-color: var(--accent); }
   .stamp-err { color: var(--bad);  border-color: var(--bad);  }
 </style>
+  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -160,7 +161,9 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">프롬프트 / 질문 — prompt / question</label>
-    <textarea id="prompt" placeholder="프롬프트를 입력하세요… 예: 한국의 수도는?" id="prompt"></textarea>
+      <div id="fcoin-registry"></div>
+
+  <textarea id="prompt" placeholder="프롬프트를 입력하세요… 예: 한국의 수도는?" id="prompt"></textarea>
     <div class="row">
       <button id="go">제출</button>
       <span class="hint">실행 중인 모든 에이전트가 응답합니다 / all active agents will respond</span>
@@ -175,6 +178,15 @@
   <div id="responses"><div class="empty" id="empty">에이전트의 응답을 기다리는 중… / waiting for agent responses…</div></div>
 
 </div>
+
+<script src="/static/registry.js"></script>
+<script>
+  FcoinRegistry.init({
+    anchor:  '#fcoin-registry',
+    agentId: 'dashboard-ko',
+    labels:  {"machines": "기계 / machines", "broadcast": "모두에게 브로드캐스트", "target": "하나에게 보내기", "online": "온라인", "loading": "기계 로딩 중…", "empty": "온라인 기계 없음", "error": "기계를 불러올 수 없음"},
+  });
+</script>
 
 <script>
 (function() {

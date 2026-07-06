@@ -245,6 +245,7 @@
     text-transform: uppercase; letter-spacing: 2px;
   }
 </style>
+  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -270,7 +271,9 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">Промт / вопрос — prompt / question</label>
-    <textarea id="prompt" placeholder="Введите промт… Например: Объясните теорию относительности простыми словами."></textarea>
+      <div id="fcoin-registry"></div>
+
+  <textarea id="prompt" placeholder="Введите промт… Например: Объясните теорию относительности простыми словами."></textarea>
     <div class="row">
       <button id="go">Отправить</button>
       <span class="hint">каждый работающий агент ответит — every active agent will respond</span>
@@ -290,6 +293,15 @@
   </div>
 
 </div>
+
+<script src="/static/registry.js"></script>
+<script>
+  FcoinRegistry.init({
+    anchor:  '#fcoin-registry',
+    agentId: 'dashboard-ru',
+    labels:  {"machines": "машины", "broadcast": "транслировать всем", "target": "отправить одной", "online": "в сети", "loading": "загрузка машин…", "empty": "нет машин в сети", "error": "не удалось загрузить машины"},
+  });
+</script>
 
 <script>
 (function() {

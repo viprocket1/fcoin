@@ -125,6 +125,7 @@
   .stamp-pend{ color: var(--accent);  border-color: var(--accent);  }
   .stamp-err { color: var(--bad);  border-color: var(--bad);  }
 </style>
+  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -150,7 +151,9 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">Prompt / Eingabe</label>
-    <textarea id="prompt" placeholder="Prompt eingeben… z.B. Was ist die Hauptstadt von Deutschland?"></textarea>
+      <div id="fcoin-registry"></div>
+
+  <textarea id="prompt" placeholder="Prompt eingeben… z.B. Was ist die Hauptstadt von Deutschland?"></textarea>
     <div class="row">
       <button id="go">Absenden</button>
       <span class="hint">jeder laufende Agent antwortet / every running agent responds</span>
@@ -165,6 +168,15 @@
   <div id="responses"><div class="empty" id="empty">warten auf Agenten… waiting for agents…</div></div>
 
 </div>
+
+<script src="/static/registry.js"></script>
+<script>
+  FcoinRegistry.init({
+    anchor:  '#fcoin-registry',
+    agentId: 'dashboard-de',
+    labels:  {"machines": "Maschinen", "broadcast": "an alle senden", "target": "an eine senden", "online": "online", "loading": "lade Maschinen…", "empty": "keine Maschinen online", "error": "Maschinen konnten nicht geladen werden"},
+  });
+</script>
 
 <script>
 (function() {

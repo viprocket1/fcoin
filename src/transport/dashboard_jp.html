@@ -124,6 +124,7 @@
   .stamp-pend{ color: var(--ink);  border-color: var(--ink);  }
   .stamp-err { color: var(--bad);  border-color: var(--bad);  }
 </style>
+  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -149,7 +150,9 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">プロンプト / prompt</label>
-    <textarea id="prompt" placeholder="プロンプトを入力… 例：日本の首都は？"></textarea>
+      <div id="fcoin-registry"></div>
+
+  <textarea id="prompt" placeholder="プロンプトを入力… 例：日本の首都は？"></textarea>
     <div class="row">
       <button id="go">送信する</button>
       <span class="hint">全ての実行中agara agentsが回答します</span>
@@ -164,6 +167,15 @@
   <div id="responses"><div class="empty" id="empty">agi tasigal… waiting for agents…</div></div>
 
 </div>
+
+<script src="/static/registry.js"></script>
+<script>
+  FcoinRegistry.init({
+    anchor:  '#fcoin-registry',
+    agentId: 'dashboard-jp',
+    labels:  {"machines": "マシン / machines", "broadcast": "全員へ配信 / broadcast", "target": "単発送信 / send to one", "online": "オンライン", "loading": "マシン読込中…", "empty": "オンラインのマシンなし", "error": "マシン一覧を取得できません"},
+  });
+</script>
 
 <script>
 (function() {

@@ -128,6 +128,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/registry.css">
 </head>
 <body>
 <div class="wrap">
@@ -153,7 +154,9 @@
   <!-- input -->
   <div class="input-box">
     <label for="prompt">提示词 / prompt</label>
-    <textarea id="prompt" placeholder="输入提示词… 例如：北京的天气如何？"></textarea>
+      <div id="fcoin-registry"></div>
+
+  <textarea id="prompt" placeholder="输入提示词… 例如：北京的天气如何？"></textarea>
     <div class="row">
       <button id="go">提交</button>
       <span class="hint">所有运行中的智能体将作答</span>
@@ -168,6 +171,15 @@
   <div id="responses"><div class="empty" id="empty">等待智能体响应… waiting for agents…</div></div>
 
 </div>
+
+<script src="/static/registry.js"></script>
+<script>
+  FcoinRegistry.init({
+    anchor:  '#fcoin-registry',
+    agentId: 'dashboard-zh',
+    labels:  {"machines": "机器 / machines", "broadcast": "广播给所有人", "target": "发送给一台", "online": "在线", "loading": "正在加载机器…", "empty": "没有在线机器", "error": "无法加载机器"},
+  });
+</script>
 
 <script>
 (function() {
