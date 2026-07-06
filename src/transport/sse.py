@@ -53,6 +53,12 @@ async def _dashboard(request: Request) -> FileResponse:
     return FileResponse(os.path.join(here, "dashboard.html"))
 
 
+async def _dashboard_jp(request: Request) -> FileResponse:
+    """GET /dashboard/jp — Japanese-style prompt stream UI."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    return FileResponse(os.path.join(here, "dashboard_jp.html"))
+
+
 # Registry of every API endpoint with a one-line description. Used by
 # GET / to render a navigable index. The list mirrors the routes
 # registered in run_sse() — keep them in sync when adding new routes.
@@ -60,6 +66,7 @@ API_INDEX: list[dict] = [
     # --- health / status ---
     {"method": "GET",  "path": "/",            "name": "index",        "desc": "this page: every API endpoint with descriptions"},
     {"method": "GET",  "path": "/dashboard",  "name": "dashboard",    "desc": "single-page HTML UI: submit prompts, watch responses live"},
+    {"method": "GET",  "path": "/dashboard/jp","name": "dashboard_jp", "desc": "Japanese-style variant of the dashboard"},
     {"method": "GET",  "path": "/health",      "name": "health",       "desc": "liveness check for Render / load balancers"},
 
     # --- market data ---
@@ -744,6 +751,7 @@ async def run_sse(server: "MCPServer", host: str = "0.0.0.0", port: int = 8080) 
     app = Starlette()
     app.add_route("/", _index, methods=["GET"])
     app.add_route("/dashboard", _dashboard, methods=["GET"])
+    app.add_route("/dashboard/jp", _dashboard_jp, methods=["GET"])
     app.add_route("/health", _health, methods=["GET"])
     app.add_route("/ticker", _ticker, methods=["GET"])
     app.add_route("/portfolio", _portfolio, methods=["GET"])
