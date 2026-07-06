@@ -21,20 +21,28 @@
                font: 14px/1.8 "Hiragino Kaku Gothic Pro", "Yu Gothic",
                       "Meiryo", "MS Gothic", sans-serif; }
 
-  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 18px 20px 80px; }
 
-  /* ── header ── */
-  header { margin-bottom: 36px; border-bottom: 1px solid var(--line); padding-bottom: 20px; }
-  header h1 {
-    font-size: 28px; font-weight: 900; margin: 0; color: var(--ink);
-    letter-spacing: 0.15em;
+  /* ── compact topbar ── */
+  .topbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 8px 0 12px; border-bottom: 1px solid var(--line);
+    margin-bottom: 16px; font-size: 12px;
   }
-  header .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
-  .endpoint { font-size: 11px; color: var(--muted);
-              font-family: monospace; margin-top: 6px; }
+  .topbar .tb-title {
+    font-size: 16px; font-weight: 900; color: var(--ink);
+    letter-spacing: 0.1em; margin-right: 4px;
+  }
+  .topbar .tb-sep { color: #3a3530; }
+  .topbar .tb-stat { color: var(--muted); }
+  .topbar .tb-stat b { color: var(--fg); font-weight: 700; }
+  .topbar .tb-end {
+    margin-left: auto; color: var(--muted);
+    font-family: monospace; font-size: 10px;
+  }
   .live-dot {
-    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--bad); margin-right: 5px; vertical-align: 2px;
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--bad); margin-right: 4px; vertical-align: 1px;
   }
   .live-dot.on { background: var(--good); animation: pulse 2s ease-in-out infinite; }
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
@@ -74,15 +82,6 @@
             white-space: pre-wrap; word-break: break-all; display: none; }
   #result.ok  { display: block; background: #0a2010; color: var(--good); border-left: 3px solid var(--good); }
   #result.err { display: block; background: #200a0a; color: var(--bad);  border-left: 3px solid var(--bad); }
-
-  /* ── stats bar ── */
-  .stats {
-    display: flex; gap: 24px; margin: 24px 0; flex-wrap: wrap;
-  }
-  .stat { text-align: center; }
-  .stat-n { font-size: 22px; font-weight: 900; color: var(--fg); }
-  .stat-l { font-size: 10px; color: var(--muted); text-transform: uppercase;
-            letter-spacing: 1px; }
 
   /* ── feed ── */
   .divider { border: none; border-top: 1px solid var(--line); margin: 28px 0 20px; }
@@ -173,23 +172,17 @@
 <body>
 <div class="wrap">
 
-  <header>
-    <h1>符文</h1>
-    <div class="sub">fcoin プロンプトマーケットプレイス — agara agents nashioru</div>
-    <div class="endpoint" id="endpoint"></div>
-    <div style="margin-top:8px;">
-      <span class="live-dot" id="dot"></span>
-      <span style="font-size:11px;color:var(--muted);" id="status-txt">connecting…</span>
-    </div>
+  <header class="topbar">
+    <span class="tb-title">符文</span>
+    <span class="tb-sep">·</span>
+    <span class="tb-stat"><span class="live-dot" id="dot"></span><span id="status-txt">connecting…</span></span>
+    <span class="tb-sep">·</span>
+    <span class="tb-stat"><b id="tb-prompts">—</b> prompts</span>
+    <span class="tb-stat"><b id="tb-responses">—</b> responses</span>
+    <span class="tb-stat"><b id="tb-agents">—</b> agents</span>
+    <span class="tb-stat"><b id="tb-volume">—</b> USDC</span>
+    <span class="tb-end" id="endpoint"></span>
   </header>
-
-  <!-- stats -->
-  <div class="stats">
-    <div class="stat"><div class="stat-n" id="stat-prompts">—</div><div class="stat-l">prompts</div></div>
-    <div class="stat"><div class="stat-n" id="stat-responses">—</div><div class="stat-l">responses</div></div>
-    <div class="stat"><div class="stat-n" id="stat-agents">—</div><div class="stat-l">agents</div></div>
-    <div class="stat"><div class="stat-n" id="stat-volume">—</div><div class="stat-l">USDC volume</div></div>
-  </div>
 
   <!-- input -->
   <div class="input-box">
@@ -340,13 +333,13 @@
     fetch(base + '/stats')
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        document.getElementById('stat-prompts').textContent =
+        document.getElementById('tb-prompts').textContent =
           (d.total_requests || d.prompts_submitted || 0);
-        document.getElementById('stat-responses').textContent =
+        document.getElementById('tb-responses').textContent =
           (d.total_responses || 0);
-        document.getElementById('stat-agents').textContent =
+        document.getElementById('tb-agents').textContent =
           (d.active_agents || d.total_agents || 0);
-        document.getElementById('stat-volume').textContent =
+        document.getElementById('tb-volume').textContent =
           ((d.total_volume_usdc || 0).toFixed ? (d.total_volume_usdc || 0).toFixed(2) : '?');
       })
       .catch(function() {});
